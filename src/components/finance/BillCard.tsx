@@ -5,7 +5,7 @@ import { Check, Undo2, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/finance/Money";
 import { StatusBadge } from "@/components/finance/StatusBadge";
-import { formatarData, estaAtrasada, rotuloMes } from "@/lib/finance/dates";
+import { formatarData, formatarDataHora, estaAtrasada, rotuloMes, mesDoPagamento } from "@/lib/finance/dates";
 import { valorEfetivo } from "@/lib/finance/money";
 import type { ExpenseInstallmentWithSource } from "@/types/database";
 
@@ -32,6 +32,8 @@ export function BillCard({
   const atrasada = estaAtrasada(parcela.vencimento_atual, parcela.status);
   const status = parcela.status === "pago" ? "pago" : atrasada ? "atrasado" : "pendente";
   const temJuros = parcela.juros_centavos > 0;
+  const mesPago = mesDoPagamento(parcela.pago_em);
+  const pagaEmOutroMes = parcela.status === "pago" && !!parcela.pago_em && mesPago !== parcela.mes_referencia;
 
   async function acao(fn: () => void) {
     setProcessando(true);
@@ -58,6 +60,12 @@ export function BillCard({
         <p className="mt-0.5 truncate text-xs text-ink-muted">
           {categoriaNome} · Vencimento {formatarData(parcela.vencimento_atual)}
         </p>
+        {parcela.status === "pago" && parcela.pago_em && (
+          <p className="mt-0.5 text-xs text-money-in">
+            Paga em {formatarDataHora(parcela.pago_em)}
+            {pagaEmOutroMes && <> · conta de {rotuloMes(parcela.mes_referencia)}</>}
+          </p>
+        )}
         {temJuros && (
           <p className="mt-0.5 text-xs text-brand-gold">
             + <Money centavos={parcela.juros_centavos} className="text-xs" /> de juros

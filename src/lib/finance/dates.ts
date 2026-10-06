@@ -62,3 +62,18 @@ export function mesAtualISO(): string {
 export function estaAtrasada(vencimentoISO: string, status: string): boolean {
   return status === "pendente" && vencimentoISO < hojeISO();
 }
+
+/** Mês (YYYY-MM-01) em que o pagamento foi feito, pelo horário local. Null se não está pago. */
+export function mesDoPagamento(pagoEm: string | null): string | null {
+  return pagoEm ? mesReferencia(new Date(pagoEm)) : null;
+}
+
+/** Início do mês em ISO com fuso (meia-noite local), para filtrar colunas timestamptz. */
+export function inicioDoMesTimestamp(mesISO: string): string {
+  return new Date(`${mesISO}T00:00:00`).toISOString();
+}
+
+/** Data e hora local de um timestamp, ex.: 05/10/2026 às 14:32. */
+export function formatarDataHora(timestampISO: string): string {
+  return format(parseISO(timestampISO), "dd/MM/yyyy 'às' HH:mm");
+}

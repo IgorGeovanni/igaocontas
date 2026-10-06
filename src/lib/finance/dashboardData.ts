@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 import {
   hojeISO,
+  inicioDoMesTimestamp,
   mesAnterior,
   mesReferencia,
   mesSeguinte,
@@ -121,8 +122,8 @@ export async function carregarDashboard(mes: string): Promise<DashboardData> {
       .from("expense_installments")
       .select("valor_centavos, juros_centavos")
       .eq("status", "pago")
-      .gte("pago_em", mes)
-      .lt("pago_em", mesSeguinte(mes)),
+      .gte("pago_em", inicioDoMesTimestamp(mes))
+      .lt("pago_em", inicioDoMesTimestamp(mesSeguinte(mes))),
     // saldo bancário: desde sempre, sem filtro de mês nenhum
     supabase.from("incomes").select("valor_centavos"),
     supabase.from("expense_installments").select("valor_centavos, juros_centavos").eq("status", "pago"),

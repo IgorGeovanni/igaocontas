@@ -16,7 +16,13 @@ import { NewExpenseModal } from "@/components/finance/NewExpenseModal";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { createClient } from "@/lib/supabase/client";
-import { estaAtrasada, mesAtualISO } from "@/lib/finance/dates";
+import {
+  estaAtrasada,
+  inicioDoMesTimestamp,
+  mesAtualISO,
+  mesDoPagamento,
+  mesSeguinte,
+} from "@/lib/finance/dates";
 import { valorEfetivo } from "@/lib/finance/money";
 import type { ExpenseInstallmentWithSource, TipoFonteDespesa } from "@/types/database";
 
@@ -67,8 +73,26 @@ function ContasDoMesConteudo() {
       query = query.eq("mes_referencia", mes);
     }
     const { data } = await query.order("vencimento_atual", { ascending: true });
+    let lista = (data as ExpenseInstallmentWithSource[]) ?? [];
 
-    setParcelas((data as ExpenseInstallmentWithSource[]) ?? []);
+    // Contas de outros meses que foram pagas NESTE mês também aparecem aqui:
+    // mantêm o vencimento do mês de origem, mas contam como pagas no mês do pagamento.
+    if (!modoTodosMeses) {
+      const { data: pagasNoMes } = await supabase
+        .from("expense_installments")
+        .select("*, expense_sources(*)")
+        .eq("status", "pago")
+        .gte("pago_em", inicioDoMesTimestamp(mes))
+        .lt("pago_em", inicioDoMesTimestamp(mesSeguinte(mes)));
+
+      const idsJaNaLista = new Set(lista.map((p) => p.id));
+      const extras = ((pagasNoMes as ExpenseInstallmentWithSource[]) ?? []).filter(
+        (p) => !idsJaNaLista.has(p.id)
+      );
+      lista = [...lista, ...extras].sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual));
+    }
+
+    setParcelas(lista);
     setCarregando(false);
   }
 
@@ -96,8 +120,9 @@ function ContasDoMesConteudo() {
   const totalPendente = filtradas
     .filter((p) => p.status === "pendente")
     .reduce((acc, p) => acc + valorEfetivo(p), 0);
+  // Na visão por mês, "Já pago" conta o que foi pago neste mês (mesmo que a conta seja de outro mês).
   const totalPago = filtradas
-    .filter((p) => p.status === "pago")
+    .filter((p) => p.status === "pago" && (modoTodosMeses || mesDoPagamento(p.pago_em) === mes))
     .reduce((acc, p) => acc + valorEfetivo(p), 0);
 
   async function desmarcarPago(id: string) {
