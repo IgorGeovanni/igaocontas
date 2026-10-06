@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useGroups } from "@/lib/hooks/useGroups";
 import { textoParaCentavos, centavosParaReais, formatarMoeda } from "@/lib/finance/money";
 import { mesReferenciaDeString } from "@/lib/finance/dates";
 import type { ExpenseInstallmentWithSource } from "@/types/database";
@@ -16,6 +17,9 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
   const [valor, setValor] = useState("");
   const [juros, setJuros] = useState("");
   const [vencimento, setVencimento] = useState("");
+  const { grupos, recarregar: recarregarGrupos } = useGroups();
+  const [grupoId, setGrupoId] = useState("");
+  const [novoGrupo, setNovoGrupo] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -24,6 +28,8 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
       setValor(String(centavosParaReais(parcela.valor_centavos)).replace(".", ","));
       setJuros(parcela.juros_centavos > 0 ? String(centavosParaReais(parcela.juros_centavos)).replace(".", ",") : "");
       setVencimento(parcela.vencimento_atual);
+      setGrupoId(parcela.expense_sources.grupo_id ?? "");
+      setNovoGrupo("");
       setErro(null);
     }
   }, [parcela]);
@@ -45,6 +51,35 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
 
     setSalvando(true);
     const supabase = createClient();
+
+    // grupo: usa o escolhido na lista ou cria um novo se foi digitado
+    let grupoFinal: string | null = grupoId || null;
+    if (novoGrupo.trim()) {
+      const { data: criado, error: erroGrupo } = await supabase
+        .from("expense_groups")
+        .insert({ user_id: (await supabase.auth.getUser()).data.user?.id, nome: novoGrupo.trim() })
+        .select("id")
+        .single();
+      if (erroGrupo || !criado) {
+        setSalvando(false);
+        setErro("Já existe um grupo com esse nome, selecione ele na lista.");
+        return;
+      }
+      grupoFinal = criado.id;
+    }
+    if (grupoFinal !== (parcela!.expense_sources.grupo_id ?? null)) {
+      const { error: erroFonte } = await supabase
+        .from("expense_sources")
+        .update({ grupo_id: grupoFinal })
+        .eq("id", parcela!.source_id);
+      if (erroFonte) {
+        setSalvando(false);
+        setErro(erroFonte.message);
+        return;
+      }
+    }
+    recarregarGrupos();
+
     const { error } = await supabase
       .from("expense_installments")
       .update({
@@ -67,7 +102,7 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 md:items-center">
       <form
         onSubmit={salvar}
-        className="w-full max-w-md rounded-card border border-base-border bg-base-surface p-5 shadow-card"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-card border border-base-border bg-base-surface p-5 shadow-card"
       >
         <h2 className="mb-1 font-display text-lg font-semibold">Editar conta</h2>
         <p className="mb-4 truncate text-sm text-ink-muted">
@@ -115,6 +150,39 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
               Some ao valor principal só desta conta. Não é calculado sozinho por atraso — você
               preenche quando precisar.
             </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-ink-muted">Grupo</label>
+            <select
+              value={grupoId}
+              onChange={(e) => {
+                setGrupoId(e.target.value);
+                if (e.target.value) setNovoGrupo("");
+              }}
+              className="mb-2 w-full rounded-xl border border-base-border bg-base-surface2 px-4 py-2.5 text-sm outline-none focus:border-brand-pink"
+            >
+              <option value="">Sem grupo</option>
+              {grupos.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.nome}
+                </option>
+              ))}
+            </select>
+            <input
+              value={novoGrupo}
+              onChange={(e) => {
+                setNovoGrupo(e.target.value);
+                if (e.target.value) setGrupoId("");
+              }}
+              placeholder="...ou crie um grupo novo"
+              className="w-full rounded-xl border border-base-border bg-base-surface2 px-4 py-2.5 text-sm outline-none focus:border-brand-pink"
+            />
+            {parcela.total_parcelas && parcela.total_parcelas > 1 && (
+              <p className="mt-1 text-xs text-ink-muted">
+                O grupo vale para todas as parcelas dessa compra.
+              </p>
+            )}
           </div>
 
           {jurosCentavos > 0 && (

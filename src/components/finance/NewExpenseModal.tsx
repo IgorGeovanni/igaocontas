@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { textoParaCentavos, formatarMoeda } from "@/lib/finance/money";
+import { hojeISO } from "@/lib/finance/dates";
 
 type Tipo = "simples" | "parcelado" | "recorrente";
 
@@ -14,7 +15,7 @@ interface Props {
   onSalvo: () => void;
 }
 
-const hojeStr = () => new Date().toISOString().slice(0, 10);
+const hojeStr = hojeISO; // data local (evita virar "amanhã" à noite)
 
 export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
   const { categorias } = useCategories("saida");
@@ -43,6 +44,8 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
   const [diaVencimento, setDiaVencimento] = useState("10");
   const [inicioRecorrencia, setInicioRecorrencia] = useState(hojeStr());
 
+  const [jaPaga, setJaPaga] = useState(false);
+  const [dataPagamento, setDataPagamento] = useState(hojeStr());
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -64,6 +67,8 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
     setDiaVencimento("10");
     setInicioRecorrencia(hojeStr());
     setTipo("simples");
+    setJaPaga(false);
+    setDataPagamento(hojeStr());
     setErro(null);
   }
 
@@ -161,6 +166,30 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
       await supabase.from("expense_sources").update({ grupo_id: grupoIdFinal }).eq("id", resultado.data);
     }
 
+    // já cadastra como paga (para parcelada/recorrente, marca só a primeira)
+    if (jaPaga && resultado?.data) {
+      const { data: primeira } = await supabase
+        .from("expense_installments")
+        .select("id")
+        .eq("source_id", resultado.data)
+        .order("vencimento_atual", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (primeira) {
+        const { error: erroPagamento } = await supabase.rpc("mark_installment_paid", {
+          p_installment_id: primeira.id,
+        });
+        if (erroPagamento) {
+          window.alert(`Conta criada, mas não foi possível marcá-la como paga: ${erroPagamento.message}`);
+        } else if (dataPagamento && dataPagamento !== hojeStr()) {
+          await supabase
+            .from("expense_installments")
+            .update({ pago_em: new Date(`${dataPagamento}T12:00:00`).toISOString() })
+            .eq("id", primeira.id);
+        }
+      }
+    }
+
     setSalvando(false);
     limpar();
     onSalvo();
@@ -175,7 +204,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
     <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/60 p-4 md:items-center">
       <form
         onSubmit={salvar}
-        className="w-full max-w-md rounded-card border border-base-border bg-base-surface p-5 shadow-card"
+        className="my-auto w-full max-w-md rounded-card border border-base-border bg-base-surface p-5 shadow-card"
       >
         <h2 className="mb-1 font-display text-lg font-semibold">Como é essa conta?</h2>
         <p className="mb-4 text-sm text-ink-muted">Escolha o tipo para organizarmos tudo automaticamente.</p>
@@ -383,6 +412,36 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
               placeholder="Ex: Pix, Cartão, Dinheiro"
               className="w-full rounded-xl border border-base-border bg-base-surface2 px-4 py-2.5 text-sm outline-none focus:border-brand-pink"
             />
+          </div>
+
+          <div className="rounded-xl border border-base-border bg-base-surface2 px-4 py-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={jaPaga}
+                onChange={(e) => setJaPaga(e.target.checked)}
+                className="h-4 w-4 accent-brand-pink"
+              />
+              Essa conta já está paga
+            </label>
+            {jaPaga && (
+              <div className="mt-3">
+                <label className="mb-1 block text-xs text-ink-muted">Paga em</label>
+                <input
+                  type="date"
+                  value={dataPagamento}
+                  onChange={(e) => setDataPagamento(e.target.value)}
+                  className="w-full rounded-xl border border-base-border bg-base-surface px-4 py-2.5 text-sm outline-none focus:border-brand-pink"
+                />
+                {tipo !== "simples" && (
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {tipo === "parcelado"
+                      ? "Marca só a primeira parcela como paga."
+                      : "Marca só o primeiro mês como pago."}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

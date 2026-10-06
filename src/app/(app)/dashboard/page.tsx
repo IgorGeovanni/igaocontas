@@ -21,6 +21,7 @@ import { EvolucaoChart } from "@/components/dashboard/EvolucaoChart";
 import { CategoriaChart } from "@/components/dashboard/CategoriaChart";
 import { ContasAcabandoCard } from "@/components/dashboard/ContasAcabandoCard";
 import { ProximosCompromissosCard } from "@/components/dashboard/ProximosCompromissosCard";
+import { AjusteSaldoModal } from "@/components/finance/AjusteSaldoModal";
 import { carregarDashboard, type DashboardData } from "@/lib/finance/dashboardData";
 import { mesAtualISO, formatarDataCurta } from "@/lib/finance/dates";
 import { variacaoPercentual, valorEfetivo } from "@/lib/finance/money";
@@ -29,6 +30,8 @@ export default function DashboardPage() {
   const [mes, setMes] = useState(mesAtualISO());
   const [dados, setDados] = useState<DashboardData | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [versao, setVersao] = useState(0);
+  const [modalAjuste, setModalAjuste] = useState(false);
 
   useEffect(() => {
     let ativo = true;
@@ -42,7 +45,7 @@ export default function DashboardPage() {
     return () => {
       ativo = false;
     };
-  }, [mes]);
+  }, [mes, versao]);
 
   return (
     <div>
@@ -89,6 +92,12 @@ export default function DashboardPage() {
                   Tudo que já entrou, menos tudo que você já pagou de fato (não importa o mês da
                   conta), menos o que está guardado/investido.
                 </p>
+                <button
+                  onClick={() => setModalAjuste(true)}
+                  className="mt-3 rounded-pill border border-brand-gold/40 px-3 py-1.5 text-xs font-semibold text-brand-gold hover:bg-brand-gold/10"
+                >
+                  Lançar diferença
+                </button>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
                   <span>
                     Entradas: <Money centavos={dados.totalEntradasGeral} className="font-medium text-money-in" />
@@ -285,6 +294,15 @@ export default function DashboardPage() {
           <ProximosCompromissosCard />
         </div>
       )}
+      <AjusteSaldoModal
+        aberto={modalAjuste}
+        saldoApp={dados?.saldoBancario ?? 0}
+        onFechar={() => setModalAjuste(false)}
+        onSalvo={() => {
+          setModalAjuste(false);
+          setVersao((v) => v + 1);
+        }}
+      />
     </div>
   );
 }

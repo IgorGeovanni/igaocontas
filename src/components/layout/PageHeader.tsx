@@ -8,8 +8,8 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
   return (
-    <div className="no-print mb-6 flex items-center justify-between gap-3">
-      <div>
+    <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
         <h1 className="font-display text-2xl font-bold">{title}</h1>
         {subtitle && <p className="mt-0.5 text-sm text-ink-muted">{subtitle}</p>}
       </div>

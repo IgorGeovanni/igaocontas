@@ -128,3 +128,10 @@ Abra `http://localhost:3000` — você será redirecionado para `/login`.
 
 - **Logout após 30 minutos:** o login grava o cookie `igao_login_at` (expira em 30 min). O `middleware.ts` bloqueia rotas privadas depois do prazo e o componente `SessionTimeout` desloga na hora com a aba aberta. O tempo está em `src/lib/session.ts` (`SESSION_MAX_MS`).
 - **Ping no banco:** a cada login é feita uma consulta leve em `categories` (`src/app/login/page.tsx`), para o Supabase não pausar o projeto por inatividade.
+
+## Contas e saldo
+
+- **Mês do pagamento:** conta paga em outro mês mantém o vencimento original e conta como paga no mês do pagamento (Contas do Mês e Dashboard). Toda conta paga mostra "Paga em dd/mm/aaaa às hh:mm".
+- **Grupo:** pode ser escolhido ou criado em Editar conta (vale para todas as parcelas da compra).
+- **Cadastro já paga:** checkbox "Essa conta já está paga" com data do pagamento (parcelada/recorrente marca só a primeira).
+- **Lançar diferença:** botão no card "Saldo para comparar com seu banco". Diferença positiva vira entrada "Ajuste de saldo"; negativa vira saída paga "Ajuste de saldo".

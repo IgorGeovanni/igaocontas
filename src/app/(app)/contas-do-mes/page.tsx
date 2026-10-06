@@ -38,7 +38,7 @@ function statusExigeTodosMeses(status: FiltroStatus) {
 function ContasDoMesConteudo() {
   const searchParams = useSearchParams();
   const { categorias } = useCategories("saida");
-  const { grupos } = useGroups();
+  const { grupos, recarregar: recarregarGrupos } = useGroups();
 
   const vemDePendencias = searchParams.get("pendencias") === "1";
 
@@ -315,6 +315,7 @@ function ContasDoMesConteudo() {
         onFechar={() => setEditando(null)}
         onSalvo={() => {
           setEditando(null);
+          recarregarGrupos();
           carregar();
         }}
       />

@@ -42,10 +42,10 @@ export function BillCard({
   }
 
   return (
-    <Card className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
+    <Card className="flex flex-col gap-3 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="min-w-0 lg:flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate font-medium">{parcela.expense_sources.descricao}</p>
+          <p className="min-w-0 break-words font-medium">{parcela.expense_sources.descricao}</p>
           {parcela.total_parcelas && parcela.total_parcelas > 1 && (
             <span className="shrink-0 rounded-pill bg-base-surface2 px-2 py-0.5 text-[11px] text-ink-muted">
               {parcela.numero_parcela}/{parcela.total_parcelas}
@@ -57,7 +57,7 @@ export function BillCard({
             </span>
           )}
         </div>
-        <p className="mt-0.5 truncate text-xs text-ink-muted">
+        <p className="mt-0.5 text-xs text-ink-muted">
           {categoriaNome} · Vencimento {formatarData(parcela.vencimento_atual)}
         </p>
         {parcela.status === "pago" && parcela.pago_em && (
@@ -78,7 +78,7 @@ export function BillCard({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2 lg:shrink-0 lg:flex-nowrap">
         <Money centavos={valorEfetivo(parcela)} className="font-tabular font-semibold" />
         <StatusBadge status={status} />
 
