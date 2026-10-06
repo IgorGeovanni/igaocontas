@@ -11,10 +11,11 @@ export function useGroups() {
   async function recarregar() {
     setCarregando(true);
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("expense_groups")
       .select("*")
       .order("nome", { ascending: true });
+    if (error) console.error("Erro ao carregar grupos:", error.message);
     setGrupos((data as ExpenseGroup[]) ?? []);
     setCarregando(false);
   }

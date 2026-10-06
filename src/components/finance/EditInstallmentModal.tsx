@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useGroups } from "@/lib/hooks/useGroups";
+import { mensagemErroGrupo } from "@/lib/finance/erros";
 import { textoParaCentavos, centavosParaReais, formatarMoeda } from "@/lib/finance/money";
 import { mesReferenciaDeString } from "@/lib/finance/dates";
 import type { ExpenseInstallmentWithSource } from "@/types/database";
@@ -62,7 +63,7 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
         .single();
       if (erroGrupo || !criado) {
         setSalvando(false);
-        setErro("Já existe um grupo com esse nome, selecione ele na lista.");
+        setErro(erroGrupo ? mensagemErroGrupo(erroGrupo) : "Não foi possível criar o grupo.");
         return;
       }
       grupoFinal = criado.id;

@@ -6,6 +6,7 @@ import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { textoParaCentavos, formatarMoeda } from "@/lib/finance/money";
 import { hojeISO } from "@/lib/finance/dates";
+import { mensagemErroGrupo } from "@/lib/finance/erros";
 
 type Tipo = "simples" | "parcelado" | "recorrente";
 
@@ -94,7 +95,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
         .single();
       if (erroGrupo) {
         setSalvando(false);
-        setErro("Já existe um grupo com esse nome, selecione ele na lista.");
+        setErro(mensagemErroGrupo(erroGrupo));
         return;
       }
       grupoIdFinal = grupoCriado.id;

@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { createClient } from "@/lib/supabase/client";
+import { mensagemErroGrupo } from "@/lib/finance/erros";
 import type { ExpenseGroup } from "@/types/database";
 
 export function GroupManager({ userId }: { userId: string }) {
@@ -27,7 +28,7 @@ export function GroupManager({ userId }: { userId: string }) {
       .insert({ user_id: userId, nome: nome.trim(), cor });
     setSalvando(false);
     if (error) {
-      setErro("Já existe um grupo com esse nome.");
+      setErro(mensagemErroGrupo(error));
       return;
     }
     setNome("");
