@@ -22,6 +22,7 @@ import { CategoriaChart } from "@/components/dashboard/CategoriaChart";
 import { ContasAcabandoCard } from "@/components/dashboard/ContasAcabandoCard";
 import { ProximosCompromissosCard } from "@/components/dashboard/ProximosCompromissosCard";
 import { AjusteSaldoModal } from "@/components/finance/AjusteSaldoModal";
+import { PagoPendenteChart } from "@/components/dashboard/PagoPendenteChart";
 import { carregarDashboard, type DashboardData } from "@/lib/finance/dashboardData";
 import { mesAtualISO, formatarDataCurta } from "@/lib/finance/dates";
 import { variacaoPercentual, valorEfetivo } from "@/lib/finance/money";
@@ -290,6 +291,8 @@ export default function DashboardPage() {
             <EvolucaoChart dados={dados.evolucao} />
             <CategoriaChart dados={dados.despesasPorCategoria} />
           </div>
+
+          <PagoPendenteChart key={versao} mes={mes} />
 
           <ProximosCompromissosCard />
         </div>

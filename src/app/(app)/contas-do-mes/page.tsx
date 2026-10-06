@@ -33,6 +33,8 @@ type FiltroTipo = "" | TipoFonteDespesa;
 
 // "Não pagas" e "Atrasadas" não fazem sentido presas a um único mês — quem está devendo
 // quer ver tudo o que falta, então esses dois filtros sempre buscam em todos os meses.
+const SEM_GRUPO = "__sem_grupo";
+
 function statusExigeTodosMeses(status: FiltroStatus) {
   return status === "nao_pagas" || status === "atrasadas";
 }
@@ -65,7 +67,9 @@ function ContasDoMesConteudo() {
   const [aplicandoGrupo, setAplicandoGrupo] = useState(false);
   const [erroSelecao, setErroSelecao] = useState<string | null>(null);
 
-  const modoTodosMeses = verTodosMeses || statusExigeTodosMeses(statusFiltro);
+  // "Sem grupo" também olha todos os meses: a ideia é ver tudo que falta classificar
+  const semGrupoAtivo = grupoFiltro === SEM_GRUPO;
+  const modoTodosMeses = verTodosMeses || statusExigeTodosMeses(statusFiltro) || semGrupoAtivo;
 
   function alternarSelecao(id: string) {
     setSelecionadas((atual) => {
@@ -172,7 +176,9 @@ function ContasDoMesConteudo() {
     if (statusFiltro === "atrasadas" && !atrasada) return false;
     if (tipoFiltro && p.expense_sources.tipo !== tipoFiltro) return false;
     if (categoriaFiltro && p.expense_sources.categoria_id !== categoriaFiltro) return false;
-    if (grupoFiltro && p.expense_sources.grupo_id !== grupoFiltro) return false;
+    if (grupoFiltro === SEM_GRUPO) {
+      if (p.expense_sources.grupo_id) return false;
+    } else if (grupoFiltro && p.expense_sources.grupo_id !== grupoFiltro) return false;
     if (busca.trim() && !p.expense_sources.descricao.toLowerCase().includes(busca.trim().toLowerCase()))
       return false;
     return true;
@@ -222,7 +228,7 @@ function ContasDoMesConteudo() {
 
         <button
           onClick={() => setVerTodosMeses((atual) => !atual)}
-          disabled={statusExigeTodosMeses(statusFiltro)}
+          disabled={statusExigeTodosMeses(statusFiltro) || semGrupoAtivo}
           className={`flex items-center gap-1.5 rounded-pill px-3.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
             modoTodosMeses
               ? "bg-brand-pink text-white"
@@ -299,20 +305,19 @@ function ContasDoMesConteudo() {
             </option>
           ))}
         </select>
-        {grupos.length > 0 && (
-          <select
-            value={grupoFiltro}
-            onChange={(e) => setGrupoFiltro(e.target.value)}
-            className="w-full rounded-xl border border-base-border bg-base-surface2 px-3 py-2 text-sm outline-none sm:w-auto"
-          >
-            <option value="">Todos os grupos</option>
-            {grupos.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.nome}
-              </option>
-            ))}
-          </select>
-        )}
+        <select
+          value={grupoFiltro}
+          onChange={(e) => setGrupoFiltro(e.target.value)}
+          className="w-full rounded-xl border border-base-border bg-base-surface2 px-3 py-2 text-sm outline-none sm:w-auto"
+        >
+          <option value="">Todos os grupos</option>
+          <option value={SEM_GRUPO}>Sem grupo</option>
+          {grupos.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.nome}
+            </option>
+          ))}
+        </select>
         <input
           value={busca}
           onChange={(e) => setBusca(e.target.value)}

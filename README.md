@@ -136,3 +136,4 @@ Abra `http://localhost:3000` — você será redirecionado para `/login`.
 - **Cadastro já paga:** checkbox "Essa conta já está paga" com data do pagamento (parcelada/recorrente marca só a primeira).
 - **Lançar diferença:** botão no card "Saldo para comparar com seu banco". Diferença positiva vira entrada "Ajuste de saldo"; negativa vira saída paga "Ajuste de saldo".
 - **Agrupar em lote:** em Contas do Mês, botão "Agrupar contas" permite marcar várias contas e colocá-las (ou tirá-las) de um grupo de uma vez.
+- **Gráfico Pago x a pagar:** no Dashboard, por categoria ou por grupo, somando todos os meses ou só o mês selecionado.
