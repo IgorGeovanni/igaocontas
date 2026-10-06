@@ -58,6 +58,7 @@ function ContasDoMesConteudo() {
 
   const [parcelas, setParcelas] = useState<ExpenseInstallmentWithSource[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [erroCarga, setErroCarga] = useState<string | null>(null);
   const [adiando, setAdiando] = useState<ExpenseInstallmentWithSource | null>(null);
   const [editando, setEditando] = useState<ExpenseInstallmentWithSource | null>(null);
   const [pagando, setPagando] = useState<ExpenseInstallmentWithSource | null>(null);
@@ -137,7 +138,8 @@ function ContasDoMesConteudo() {
     if (!modoTodosMeses) {
       query = query.eq("mes_referencia", mes);
     }
-    const { data } = await query.order("vencimento_atual", { ascending: true });
+    const { data, error: erroConsulta } = await query.order("vencimento_atual", { ascending: true });
+    setErroCarga(erroConsulta ? erroConsulta.message : null);
     let lista = (data as ExpenseInstallmentWithSource[]) ?? [];
 
     // Contas de outros meses que foram pagas NESTE mês também aparecem aqui:
@@ -339,6 +341,15 @@ function ContasDoMesConteudo() {
 
       {carregando ? (
         <p className="text-sm text-ink-muted">Carregando...</p>
+      ) : erroCarga ? (
+        <p className="rounded-xl border border-money-out/40 bg-money-out/10 px-4 py-3 text-sm text-money-out">
+          Não foi possível carregar as contas: {erroCarga}
+        </p>
+      ) : filtradas.length === 0 && semGrupoAtivo && parcelas.length > 0 ? (
+        <EmptyState
+          titulo={`Nenhuma conta sem grupo. As ${parcelas.length} contas carregadas já têm grupo. 🎉`}
+          icone="🏷️"
+        />
       ) : filtradas.length === 0 ? (
         <div>
           <EmptyState
