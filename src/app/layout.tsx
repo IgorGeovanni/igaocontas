@@ -9,6 +9,7 @@ const sora = Sora({ subsets: ["latin"], variable: "--font-sora" });
 export const metadata: Metadata = {
   title: "IGÃO CONTAS",
   description: "Controle financeiro pessoal — simples, rápido e direto ao ponto.",
+  appleWebApp: { capable: true, title: "IGÃO CONTAS", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {

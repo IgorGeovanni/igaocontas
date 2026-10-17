@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { textoParaCentavos, formatarMoeda } from "@/lib/finance/money";
 import { hojeISO } from "@/lib/finance/dates";
-import { mensagemErroGrupo } from "@/lib/finance/erros";
+import { obterOuCriarGrupo } from "@/lib/finance/grupos";
+import { novoId } from "@/lib/finance/ids";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 
 type Tipo = "simples" | "parcelado" | "recorrente";
 
@@ -49,6 +51,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
   const [dataPagamento, setDataPagamento] = useState(hojeStr());
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const chave = useRef(novoId());
 
   if (!aberto) return null;
 
@@ -75,6 +78,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
+    if (salvando) return; // toque duplo
     setErro(null);
 
     if (!descricao.trim()) {
@@ -82,116 +86,83 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
       return;
     }
 
-    const supabase = createClient();
-    setSalvando(true);
-
-    // se o usuário digitou um grupo novo, cria antes e usa o id dele
-    let grupoIdFinal = grupoId || null;
-    if (novoGrupo.trim()) {
-      const { data: grupoCriado, error: erroGrupo } = await supabase
-        .from("expense_groups")
-        .insert({ user_id: (await supabase.auth.getUser()).data.user?.id, nome: novoGrupo.trim() })
-        .select("id")
-        .single();
-      if (erroGrupo) {
-        setSalvando(false);
-        setErro(mensagemErroGrupo(erroGrupo));
-        return;
-      }
-      grupoIdFinal = grupoCriado.id;
-      recarregarGrupos();
-    }
-
-    let resultado;
-
+    // validação antes de qualquer gravação
+    let valorCentavos = 0;
+    let numParcelasN: number | null = null;
+    let diaN: number | null = null;
+    let vencimentoBase = vencimento;
     if (tipo === "simples") {
-      const centavos = textoParaCentavos(valor);
-      if (centavos <= 0) {
-        setSalvando(false);
+      valorCentavos = textoParaCentavos(valor);
+      if (valorCentavos <= 0) {
         setErro("Informe um valor válido.");
         return;
       }
-      resultado = await supabase.rpc("create_simple_expense", {
-        p_descricao: descricao.trim(),
-        p_categoria_id: categoriaId || null,
-        p_valor_centavos: centavos,
-        p_vencimento: vencimento,
-        p_mes_referencia: mesReferenciaCustom ? `${mesReferenciaCustom}-01` : null,
-        p_forma_pagamento: formaPagamento || null,
-        p_observacao: observacao || null,
-      });
     } else if (tipo === "parcelado") {
-      const totalCentavos = textoParaCentavos(valorTotal);
-      const n = parseInt(numParcelas, 10);
-      if (totalCentavos <= 0 || !n || n < 1) {
-        setSalvando(false);
+      valorCentavos = textoParaCentavos(valorTotal);
+      numParcelasN = parseInt(numParcelas, 10);
+      if (valorCentavos <= 0 || !numParcelasN || numParcelasN < 1) {
         setErro("Informe o valor total e o número de parcelas.");
         return;
       }
-      resultado = await supabase.rpc("create_installment_purchase", {
-        p_descricao: descricao.trim(),
-        p_categoria_id: categoriaId || null,
-        p_valor_total_centavos: totalCentavos,
-        p_num_parcelas: n,
-        p_primeiro_vencimento: primeiroVencimento,
-        p_forma_pagamento: formaPagamento || null,
-        p_observacao: observacao || null,
-      });
+      vencimentoBase = primeiroVencimento;
     } else {
-      const centavos = textoParaCentavos(valorRecorrente);
-      const dia = parseInt(diaVencimento, 10);
-      if (centavos <= 0 || !dia || dia < 1 || dia > 31) {
-        setSalvando(false);
+      valorCentavos = textoParaCentavos(valorRecorrente);
+      diaN = parseInt(diaVencimento, 10);
+      if (valorCentavos <= 0 || !diaN || diaN < 1 || diaN > 31) {
         setErro("Informe o valor mensal e o dia de vencimento (1 a 31).");
         return;
       }
-      resultado = await supabase.rpc("create_recurring_expense", {
-        p_descricao: descricao.trim(),
-        p_categoria_id: categoriaId || null,
-        p_valor_centavos: centavos,
-        p_dia_vencimento: dia,
-        p_primeiro_vencimento: inicioRecorrencia,
-        p_forma_pagamento: formaPagamento || null,
-        p_observacao: observacao || null,
-      });
+      vencimentoBase = inicioRecorrencia;
     }
 
-    if (resultado?.error) {
-      setSalvando(false);
-      setErro(resultado.error.message);
+    const supabase = createClient();
+    setSalvando(true);
+
+    // se o usuário digitou um grupo novo, cria antes (ou reaproveita o de mesmo nome)
+    let grupoIdFinal = grupoId || null;
+    if (novoGrupo.trim()) {
+      const grupo = await obterOuCriarGrupo(supabase, novoGrupo);
+      if ("erro" in grupo) {
+        setSalvando(false);
+        setErro(grupo.erro);
+        return;
+      }
+      grupoIdFinal = grupo.id;
+      recarregarGrupos();
+    }
+
+    // Tudo numa operação só no banco (criar, colocar no grupo e marcar paga).
+    // O código único (chave) faz um 2º toque em "Salvar" devolver a mesma conta.
+    const pagoEm = jaPaga
+      ? dataPagamento && dataPagamento !== hojeStr()
+        ? new Date(`${dataPagamento}T12:00:00`).toISOString()
+        : new Date().toISOString()
+      : null;
+
+    const { error } = await supabase.rpc("criar_conta", {
+      p_chave: chave.current,
+      p_tipo: tipo,
+      p_descricao: descricao.trim(),
+      p_categoria_id: categoriaId || null,
+      p_grupo_id: grupoIdFinal,
+      p_forma_pagamento: formaPagamento || null,
+      p_observacao: observacao || null,
+      p_valor_centavos: valorCentavos,
+      p_vencimento: vencimentoBase,
+      p_mes_referencia: tipo === "simples" && mesReferenciaCustom ? `${mesReferenciaCustom}-01` : null,
+      p_num_parcelas: numParcelasN,
+      p_dia_vencimento: diaN,
+      p_pago_em: pagoEm,
+    });
+
+    setSalvando(false);
+    if (error) {
+      // a chave continua a mesma: tentar de novo não duplica
+      setErro(mensagemDeErro(error));
       return;
     }
 
-    // as funções de criação não recebem grupo direto; associa logo em seguida
-    if (grupoIdFinal && resultado?.data) {
-      await supabase.from("expense_sources").update({ grupo_id: grupoIdFinal }).eq("id", resultado.data);
-    }
-
-    // já cadastra como paga (para parcelada/recorrente, marca só a primeira)
-    if (jaPaga && resultado?.data) {
-      const { data: primeira } = await supabase
-        .from("expense_installments")
-        .select("id")
-        .eq("source_id", resultado.data)
-        .order("vencimento_atual", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (primeira) {
-        const { error: erroPagamento } = await supabase.rpc("mark_installment_paid", {
-          p_installment_id: primeira.id,
-        });
-        if (erroPagamento) {
-          window.alert(`Conta criada, mas não foi possível marcá-la como paga: ${erroPagamento.message}`);
-        } else if (dataPagamento && dataPagamento !== hojeStr()) {
-          await supabase
-            .from("expense_installments")
-            .update({ pago_em: new Date(`${dataPagamento}T12:00:00`).toISOString() })
-            .eq("id", primeira.id);
-        }
-      }
-    }
-
-    setSalvando(false);
+    chave.current = novoId(); // próximo cadastro é outra conta
     limpar();
     onSalvo();
   }

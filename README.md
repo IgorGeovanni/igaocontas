@@ -41,6 +41,7 @@ igao-contas/
    7. `0007_juros_no_pagamento.sql` — permite adicionar juros direto na hora de marcar como pago
    8. `0008_guardado_investido.sql` — tabela de dinheiro guardado/investido (tela "Guardado")
    9. `0009_grupos.sql` — grupos de contas (ex: SAAEB, CPFL, nome de uma pessoa)
+   10. `0010_seguranca_desempenho.sql` — correções (recorrência duplicada, totais acima de 1000 lançamentos, salvar com internet ruim) e o "ping" que mantém o Supabase ativo. Seguro rodar com dados já cadastrados.
 3. Em **Project Settings → API**, copie a **URL** e a **anon public key**.
 4. Em **Authentication → URL Configuration**, adicione a URL do seu site (local e depois a do Netlify) em *Site URL* e *Redirect URLs* (necessário para o link de redefinição de senha funcionar).
 5. **Criar seu usuário:** o app não tem tela de autocadastro (por segurança, só quem tem acesso ao painel do Supabase cria contas novas). Para criar a sua:
@@ -127,7 +128,7 @@ Abra `http://localhost:3000` — você será redirecionado para `/login`.
 ## Sessão e keep-alive
 
 - **Logout após 30 minutos:** o login grava o cookie `igao_login_at` (expira em 30 min). O `middleware.ts` bloqueia rotas privadas depois do prazo e o componente `SessionTimeout` desloga na hora com a aba aberta. O tempo está em `src/lib/session.ts` (`SESSION_MAX_MS`).
-- **Ping no banco:** a cada login é feita uma consulta leve em `categories` (`src/app/login/page.tsx`), para o Supabase não pausar o projeto por inatividade.
+- **Ping no banco:** a cada login é feita uma consulta leve em `categories` (`src/app/login/page.tsx`). Como isso só acontece se alguém entrar, existe também a função agendada `netlify/functions/manter-supabase-ativo.mjs`, que roda sozinha 1x por dia (06:00 de Brasília) e chama a função `ping` do banco (só devolve "1", não lê nem grava dados). Usa as mesmas variáveis `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Para conferir: Netlify → Logs → Functions → manter-supabase-ativo.
 
 ## Contas e saldo
 
@@ -137,3 +138,54 @@ Abra `http://localhost:3000` — você será redirecionado para `/login`.
 - **Lançar diferença:** botão no card "Saldo para comparar com seu banco". Diferença positiva vira entrada "Ajuste de saldo"; negativa vira saída paga "Ajuste de saldo".
 - **Agrupar em lote:** em Contas do Mês, botão "Agrupar contas" permite marcar várias contas e colocá-las (ou tirá-las) de um grupo de uma vez.
 - **Gráfico Pago x a pagar:** no Dashboard, por categoria ou por grupo, somando todos os meses ou só o mês selecionado.
+- **Sem categoria:** filtro em Contas do Mês (todos os meses). O "Agrupar contas" também define a categoria de várias contas de uma vez.
+- **Editar conta recorrente (Saídas):** dá para mudar o dia do vencimento; as contas pendentes deste mês em diante são atualizadas junto (opcional).
+- **Ícone do app:** logo como favicon, ícone de iPhone/Android e manifest para instalar na tela inicial (src/app/icon.png, apple-icon.png, manifest.ts, public/icons).
+
+
+## Atualização: totais corretos, internet ruim e segurança
+
+### Como instalar
+1. **Supabase:** SQL Editor → cole `supabase/migrations/0010_seguranca_desempenho.sql` inteiro → Run.
+   Não apaga nada e pode rodar mais de uma vez. Se faltar uma migration antiga, ele para e avisa qual rodar.
+   No fim aparece uma conferência (quantidade de entradas, contas, parcelas) e a coluna
+   `recorrentes_possivelmente_duplicadas` (veja abaixo).
+2. **Site:** publique esta versão no Netlify (git push).
+3. **Recomendado:** Supabase → Authentication → Sign In / Providers → desligue **"Allow new users to sign up"**.
+   O app não tem tela de cadastro, mas com essa opção ligada qualquer pessoa com o endereço do
+   Supabase consegue criar uma conta pela API (não vê os seus dados, mas ocupa o seu banco).
+
+### Correções
+- **Totais errados depois de 1000 lançamentos:** o Supabase devolve no máximo 1000 linhas por
+  consulta, e o "Saldo para comparar com o banco", o "Total devido", o saldo anterior do Relatório e
+  a lista "Ver todas as pendências" somavam/mostravam só as primeiras 1000 — sem aviso. Agora as
+  somas são feitas no banco e as listas são buscadas em páginas.
+- **Números zerados com internet ruim:** se uma consulta falhava, o Dashboard mostrava R$ 0,00 (ou um
+  saldo errado) como se fosse verdade. Agora aparece "não foi possível carregar" com botão de tentar de novo.
+- **Conta recorrente duplicada:** abrir o Dashboard e o Contas do Mês quase juntos podia gerar a mesma
+  recorrência 2x no mês. A geração agora é feita uma de cada vez no banco.
+  Contas que já foram duplicadas aparecem na conferência do SQL — nada é apagado sozinho.
+- **Salvar 2x com internet ruim não duplica mais:** nova conta (avulsa/parcelada/recorrente, com grupo
+  e "já paga" numa operação só), entrada, guardado, compromisso da agenda e "lançar diferença" usam um
+  código único gerado no celular. "Não pago" (adiar) não adia 2 meses se tocar de novo.
+- **Grupo novo** criado numa tentativa que perdeu a resposta não trava mais com "Já existe um grupo com esse nome".
+- **Categorias padrão:** o arquivo 0004 dava erro (o histórico não aceitava registro sem dono), então as
+  categorias padrão podem nunca ter sido criadas. A 0010 corrige o histórico e cria as que faltarem.
+- **Data errada depois das 21h** nos formulários de Entrada, Guardado e Agenda (usava horário UTC).
+- **Saídas:** valor de conta avulsa com pagamento parcial mostrava só uma das partes; com muitas contas
+  avulsas a tela dava erro (URL longa demais). Agrupar centenas de contas de uma vez também.
+- **Trocar de mês rápido** não mostra mais a lista do mês errado (resposta atrasada sobrescrevia).
+- Erros ao excluir, desfazer pagamento, adiar e ativar/desativar recorrência agora aparecem na tela
+  (antes eram ignorados em silêncio). "Desfazer pagamento" pede confirmação.
+
+### Internet ruim
+- Toda conversa com o Supabase passa por `src/lib/rede/redeResiliente.ts`: tempo limite de 20 s, espera
+  a internet voltar (até 30 s), repete consultas e as operações feitas para não duplicar, e nunca repete
+  sozinho um cadastro comum. Se uma consulta falhar, mostra os últimos dados carregados com o aviso
+  "mostrando os dados de HH:MM". Com gravação em andamento, o navegador pergunta antes de fechar a página.
+- Faixa no topo avisa quando o celular está sem internet.
+
+### Mais leve
+- O gráfico "Pago x a pagar" e o card "Parceladas acabando" baixavam TODAS as parcelas a cada abertura
+  do Dashboard. Agora o banco manda só as somas (bem menos dados no 4G e no limite de tráfego do Supabase).
+- Índices novos deixam as consultas rápidas mesmo com anos de lançamentos.

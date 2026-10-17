@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { buscarTodos } from "@/lib/supabase/paginar";
 import {
   hojeISO,
   inicioDoMesTimestamp,
@@ -66,73 +67,85 @@ export interface DashboardData {
   despesasPorCategoria: { categoria: string; cor: string; total: number }[];
 }
 
+const CAMPOS_PARCELA =
+  "id, source_id, numero_parcela, total_parcelas, valor_centavos, juros_centavos, mes_referencia, vencimento_atual, status, pago_em, transferida, mes_referencia_original, vencimento_original, criado_em, atualizado_em, user_id";
+
+interface ResumoSaldos {
+  entradas_total: number;
+  pago_total: number;
+  guardado_total: number;
+  pendente_total: number;
+  pendente_qtd: number;
+  caixa_entradas: number;
+  caixa_saidas: number;
+}
+
+// Qualquer consulta que falhar derruba o carregamento inteiro (a tela mostra
+// "não foi possível carregar"). Antes, uma falha virava ZERO e o Dashboard
+// mostrava saldo errado sem avisar — perigoso com internet ruim.
+function exigir<T>(res: { data: T | null; error: unknown }): T {
+  if (res.error) throw res.error;
+  return res.data as T;
+}
+
 export async function carregarDashboard(mes: string): Promise<DashboardData> {
   const supabase = createClient();
   const mesAnt = mesAnterior(mes);
   const hoje = hojeISO();
 
   // gera ocorrências de recorrências para o mês atual e anterior, se ainda não existirem
-  await Promise.all([
-    supabase.rpc("generate_recurring_installments", { p_mes: mes }),
-    supabase.rpc("generate_recurring_installments", { p_mes: mesAnt }),
-  ]);
+  // (em sequência: o banco também garante que nunca duplica)
+  exigir(await supabase.rpc("generate_recurring_installments", { p_mes: mesAnt }));
+  exigir(await supabase.rpc("generate_recurring_installments", { p_mes: mes }));
 
   const inicioJanela = mesReferencia(subMonths(new Date(`${mes}T00:00:00`), 5));
 
-  const [
-    incomesRes,
-    installmentsRes,
-    sourcesRes,
-    atrasadasRes,
-    devidoGeralRes,
-    caixaEntradasRes,
-    caixaSaidasRes,
-    todasEntradasRes,
-    todasSaidasPagasRes,
-    guardadoRes,
-  ] = await Promise.all([
-    supabase
-      .from("incomes")
-      .select("valor_centavos, mes_referencia")
-      .gte("mes_referencia", inicioJanela)
-      .lte("mes_referencia", mes),
-    supabase
-      .from("expense_installments")
-      .select(
-        "id, source_id, numero_parcela, total_parcelas, valor_centavos, juros_centavos, mes_referencia, vencimento_atual, status, pago_em, transferida, mes_referencia_original, vencimento_original, criado_em, atualizado_em, user_id"
-      )
-      .gte("mes_referencia", inicioJanela)
-      .lte("mes_referencia", mes),
-    supabase.from("expense_sources").select("id, descricao, categoria_id, tipo"),
+  const [incomes, installments, sources, atrasadas, resumo, acabando, categoriasRes] = await Promise.all([
+    buscarTodos<Pick<Income, "valor_centavos" | "mes_referencia">>((de, ate) =>
+      supabase
+        .from("incomes")
+        .select("valor_centavos, mes_referencia")
+        .gte("mes_referencia", inicioJanela)
+        .lte("mes_referencia", mes)
+        .order("id")
+        .range(de, ate)
+    ),
+    buscarTodos<ExpenseInstallment>((de, ate) =>
+      supabase
+        .from("expense_installments")
+        .select(CAMPOS_PARCELA)
+        .gte("mes_referencia", inicioJanela)
+        .lte("mes_referencia", mes)
+        .order("id")
+        .range(de, ate)
+    ),
+    buscarTodos<Pick<ExpenseSource, "id" | "descricao" | "categoria_id" | "tipo">>((de, ate) =>
+      supabase.from("expense_sources").select("id, descricao, categoria_id, tipo").order("id").range(de, ate)
+    ),
     // busca SEM limite de janela: uma conta atrasada nunca deve "desaparecer" por ser antiga
-    supabase
-      .from("expense_installments")
-      .select(
-        "id, source_id, numero_parcela, total_parcelas, valor_centavos, juros_centavos, mes_referencia, vencimento_atual, status, pago_em, transferida, mes_referencia_original, vencimento_original, criado_em, atualizado_em, user_id"
-      )
-      .eq("status", "pendente")
-      .lt("vencimento_atual", hoje)
-      .order("vencimento_atual", { ascending: true }),
-    // total geral devido, considerando TODOS os meses (passado, presente e futuro), sem filtro de data
-    supabase.from("expense_installments").select("valor_centavos, juros_centavos").eq("status", "pendente"),
-    // regime de caixa: entradas RECEBIDAS neste mês (pela data real, não a competência)
-    supabase.from("incomes").select("valor_centavos").gte("data", mes).lt("data", mesSeguinte(mes)),
-    // regime de caixa: saídas de fato PAGAS neste mês (pela data do pagamento, não a competência)
-    supabase
-      .from("expense_installments")
-      .select("valor_centavos, juros_centavos")
-      .eq("status", "pago")
-      .gte("pago_em", inicioDoMesTimestamp(mes))
-      .lt("pago_em", inicioDoMesTimestamp(mesSeguinte(mes))),
-    // saldo bancário: desde sempre, sem filtro de mês nenhum
-    supabase.from("incomes").select("valor_centavos"),
-    supabase.from("expense_installments").select("valor_centavos, juros_centavos").eq("status", "pago"),
-    supabase.from("savings_entries").select("valor_centavos"),
+    buscarTodos<ExpenseInstallment>((de, ate) =>
+      supabase
+        .from("expense_installments")
+        .select(CAMPOS_PARCELA)
+        .eq("status", "pendente")
+        .lt("vencimento_atual", hoje)
+        .order("vencimento_atual", { ascending: true })
+        .order("id")
+        .range(de, ate)
+    ),
+    // somas "desde sempre" e do fluxo de caixa: calculadas no banco (sem limite de 1000 linhas)
+    supabase.rpc("resumo_saldos", {
+      p_antes_de: null,
+      p_caixa_data_ini: mes,
+      p_caixa_data_fim: mesSeguinte(mes),
+      p_caixa_ts_ini: inicioDoMesTimestamp(mes),
+      p_caixa_ts_fim: inicioDoMesTimestamp(mesSeguinte(mes)),
+    }),
+    supabase.rpc("contas_acabando"),
+    supabase.from("categories").select("id, nome, cor"),
   ]);
 
-  const incomes = (incomesRes.data as Pick<Income, "valor_centavos" | "mes_referencia">[]) ?? [];
-  const installments = (installmentsRes.data as ExpenseInstallment[]) ?? [];
-  const sources = (sourcesRes.data as Pick<ExpenseSource, "id" | "descricao" | "categoria_id" | "tipo">[]) ?? [];
+  const r = exigir(resumo) as ResumoSaldos;
   const sourceById = new Map(sources.map((s) => [s.id, s]));
 
   // ---- Totais do mês e do mês anterior ----
@@ -166,67 +179,34 @@ export async function carregarDashboard(mes: string): Promise<DashboardData> {
     .sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual))
     .slice(0, 5);
 
-  const contasAtrasadas = ((atrasadasRes.data as ExpenseInstallment[]) ?? []).sort((a, b) =>
-    a.vencimento_atual.localeCompare(b.vencimento_atual)
-  );
+  const contasAtrasadas = [...atrasadas].sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual));
 
-  const devidoGeral = (devidoGeralRes.data as { valor_centavos: number; juros_centavos: number }[]) ?? [];
-  const totalDevidoGeral = devidoGeral.reduce((acc, i) => acc + valorEfetivo(i), 0);
-  const qtdContasPendentesGeral = devidoGeral.length;
-
-  // ---- Regime de caixa (mês selecionado) ----
-  const caixaEntradasMes = somar((caixaEntradasRes.data as { valor_centavos: number }[]) ?? [], "valor_centavos");
-  const caixaSaidasMes = ((caixaSaidasRes.data as { valor_centavos: number; juros_centavos: number }[]) ?? []).reduce(
-    (acc, i) => acc + valorEfetivo(i),
-    0
-  );
-
-  // ---- Saldo para comparar com o banco (desde sempre) ----
-  const totalEntradasGeral = somar((todasEntradasRes.data as { valor_centavos: number }[]) ?? [], "valor_centavos");
-  const totalPagoGeral = (
-    (todasSaidasPagasRes.data as { valor_centavos: number; juros_centavos: number }[]) ?? []
-  ).reduce((acc, i) => acc + valorEfetivo(i), 0);
-  const totalGuardadoInvestido = somar(
-    (guardadoRes.data as { valor_centavos: number }[]) ?? [],
-    "valor_centavos"
-  );
+  // ---- Total devido (todos os meses), fluxo de caixa e saldo bancário: vêm somados do banco ----
+  const totalDevidoGeral = Number(r.pendente_total);
+  const qtdContasPendentesGeral = Number(r.pendente_qtd);
+  const caixaEntradasMes = Number(r.caixa_entradas);
+  const caixaSaidasMes = Number(r.caixa_saidas);
+  const totalEntradasGeral = Number(r.entradas_total);
+  const totalPagoGeral = Number(r.pago_total);
+  const totalGuardadoInvestido = Number(r.guardado_total);
   const saldoBancario = totalEntradasGeral - totalPagoGeral - totalGuardadoInvestido;
 
   // ---- Contas parceladas acabando (faltam 1 ou 2 parcelas) ----
-  const parceladoIds = sources.filter((s) => s.tipo === "parcelado").map((s) => s.id);
-  let contasAcabando: ContaAcabando[] = [];
-  if (parceladoIds.length > 0) {
-    const { data: todasParcelas } = await supabase
-      .from("expense_installments")
-      .select("source_id, numero_parcela, total_parcelas, status")
-      .in("source_id", parceladoIds);
-
-    const porFonte = new Map<string, { numero_parcela: number; status: string; total: number }[]>();
-    (todasParcelas ?? []).forEach((p) => {
-      const lista = porFonte.get(p.source_id) ?? [];
-      lista.push({ numero_parcela: p.numero_parcela, status: p.status, total: p.total_parcelas ?? 0 });
-      porFonte.set(p.source_id, lista);
-    });
-
-    contasAcabando = Array.from(porFonte.entries())
-      .map(([sourceId, parcelas]) => {
-        const total = parcelas[0]?.total ?? parcelas.length;
-        const pagas = parcelas.filter((p) => p.status === "pago").length;
-        const faltam = total - pagas;
-        const proxima = parcelas
-          .filter((p) => p.status === "pendente")
-          .sort((a, b) => a.numero_parcela - b.numero_parcela)[0];
-        return {
-          sourceId,
-          descricao: sourceById.get(sourceId)?.descricao ?? "Compra",
-          numeroAtual: proxima?.numero_parcela ?? total,
-          totalParcelas: total,
-          faltam,
-        };
-      })
-      .filter((c) => c.faltam > 0 && c.faltam <= 2)
-      .sort((a, b) => a.faltam - b.faltam);
-  }
+  const contasAcabando: ContaAcabando[] = (
+    (exigir(acabando) as {
+      source_id: string;
+      descricao: string;
+      numero_atual: number;
+      total_parcelas: number;
+      faltam: number;
+    }[]) ?? []
+  ).map((c) => ({
+    sourceId: c.source_id,
+    descricao: c.descricao ?? "Compra",
+    numeroAtual: c.numero_atual,
+    totalParcelas: c.total_parcelas,
+    faltam: c.faltam,
+  }));
 
   // ---- Evolução dos últimos 6 meses ----
   const meses: string[] = [];
@@ -245,8 +225,7 @@ export async function carregarDashboard(mes: string): Promise<DashboardData> {
   });
 
   // ---- Despesas por categoria (mês atual) ----
-  const categoriasRes = await supabase.from("categories").select("id, nome, cor");
-  const categorias = (categoriasRes.data ?? []) as { id: string; nome: string; cor: string }[];
+  const categorias = (exigir(categoriasRes) ?? []) as { id: string; nome: string; cor: string }[];
   const categoriaMap = new Map(categorias.map((c) => [c.id, c]));
 
   const totalPorCategoria = new Map<string, number>();

@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { novoId, ehDuplicado } from "@/lib/finance/ids";
+import { hojeISO } from "@/lib/finance/dates";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import type { AgendaCompromisso } from "@/types/database";
 
 interface Props {
@@ -19,6 +22,8 @@ export function AgendaFormModal({ aberto, userId, compromissoEditando, onFechar,
   const [observacao, setObservacao] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // código do novo registro: tocar em "Salvar" de novo depois de uma queda de internet não duplica
+  const novoRegistroId = useRef(novoId());
 
   useEffect(() => {
     if (compromissoEditando) {
@@ -28,7 +33,8 @@ export function AgendaFormModal({ aberto, userId, compromissoEditando, onFechar,
       setObservacao(compromissoEditando.observacao ?? "");
     } else {
       setTitulo("");
-      setData(new Date().toISOString().slice(0, 10));
+      setData(hojeISO()); // data local (antes, depois das 21h já virava o dia seguinte)
+      novoRegistroId.current = novoId();
       setHorario("");
       setObservacao("");
     }
@@ -39,6 +45,7 @@ export function AgendaFormModal({ aberto, userId, compromissoEditando, onFechar,
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
+    if (salvando) return;
     if (!titulo.trim() || !data) {
       setErro("Informe pelo menos o título e a data.");
       return;
@@ -55,11 +62,12 @@ export function AgendaFormModal({ aberto, userId, compromissoEditando, onFechar,
 
     const resultado = compromissoEditando
       ? await supabase.from("agenda_compromissos").update(payload).eq("id", compromissoEditando.id)
-      : await supabase.from("agenda_compromissos").insert(payload);
+      : await supabase.from("agenda_compromissos").insert({ ...payload, id: novoRegistroId.current });
 
     setSalvando(false);
-    if (resultado.error) {
-      setErro(resultado.error.message);
+    // "já existe" com o mesmo código = a tentativa anterior chegou ao banco: deu certo
+    if (resultado.error && !(!compromissoEditando && ehDuplicado(resultado.error))) {
+      setErro(mensagemDeErro(resultado.error));
       return;
     }
     onSalvo();

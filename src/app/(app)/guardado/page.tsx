@@ -10,6 +10,7 @@ import { Money } from "@/components/finance/Money";
 import { SavingsFormModal } from "@/components/finance/SavingsFormModal";
 import { useUser } from "@/lib/hooks/useUser";
 import { createClient } from "@/lib/supabase/client";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { formatarData } from "@/lib/finance/dates";
 import type { SavingsEntry, TipoGuardado } from "@/types/database";
 
@@ -27,7 +28,8 @@ export default function GuardadoPage() {
     const supabase = createClient();
     let query = supabase.from("savings_entries").select("*");
     if (filtroTipo) query = query.eq("tipo", filtroTipo);
-    const { data } = await query.order("data", { ascending: false });
+    const { data, error: erroLista } = await query.order("data", { ascending: false });
+    if (erroLista) window.alert(`Não foi possível carregar: ${mensagemDeErro(erroLista)}`);
     setItens((data as SavingsEntry[]) ?? []);
     setCarregando(false);
   }
@@ -43,7 +45,8 @@ export default function GuardadoPage() {
   async function excluir() {
     if (!excluindo) return;
     const supabase = createClient();
-    await supabase.from("savings_entries").delete().eq("id", excluindo.id);
+    const { error: erroExcluir } = await supabase.from("savings_entries").delete().eq("id", excluindo.id);
+    if (erroExcluir) window.alert(`Não foi possível excluir: ${mensagemDeErro(erroExcluir)}`);
     setExcluindo(null);
     carregar();
   }

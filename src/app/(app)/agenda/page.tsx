@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { AgendaFormModal } from "@/components/agenda/AgendaFormModal";
 import { useUser } from "@/lib/hooks/useUser";
 import { createClient } from "@/lib/supabase/client";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { formatarData, hojeISO } from "@/lib/finance/dates";
 import type { AgendaCompromisso } from "@/types/database";
 
@@ -32,7 +33,8 @@ export default function AgendaPage() {
     if (filtro === "proximos") query = query.eq("concluido", false).gte("data", hojeISO());
     if (filtro === "concluidos") query = query.eq("concluido", true);
 
-    const { data } = await query.order("data", { ascending: true }).order("horario", { ascending: true });
+    const { data, error: erroLista } = await query.order("data", { ascending: true }).order("horario", { ascending: true });
+    if (erroLista) window.alert(`Não foi possível carregar: ${mensagemDeErro(erroLista)}`);
     setItens((data as AgendaCompromisso[]) ?? []);
     setCarregando(false);
   }
@@ -54,7 +56,8 @@ export default function AgendaPage() {
   async function excluir() {
     if (!excluindo) return;
     const supabase = createClient();
-    await supabase.from("agenda_compromissos").delete().eq("id", excluindo.id);
+    const { error: erroExcluir } = await supabase.from("agenda_compromissos").delete().eq("id", excluindo.id);
+    if (erroExcluir) window.alert(`Não foi possível excluir: ${mensagemDeErro(erroExcluir)}`);
     setExcluindo(null);
     carregar();
   }

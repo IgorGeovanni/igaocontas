@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { novoId, ehDuplicado } from "@/lib/finance/ids";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { createClient } from "@/lib/supabase/client";
 import { textoParaCentavos, formatarMoeda } from "@/lib/finance/money";
 import { hojeISO, mesAtualISO } from "@/lib/finance/dates";
@@ -20,6 +22,7 @@ export function AjusteSaldoModal({ aberto, saldoApp, onFechar, onSalvo }: Props)
   const [saldoBanco, setSaldoBanco] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const chave = useRef(novoId());
 
   if (!aberto) return null;
 
@@ -34,6 +37,7 @@ export function AjusteSaldoModal({ aberto, saldoApp, onFechar, onSalvo }: Props)
 
   async function lancar(e: React.FormEvent) {
     e.preventDefault();
+    if (salvando) return;
     setErro(null);
     if (!informou || diferenca === 0) {
       setErro("Informe o saldo do banco. Se for igual ao do app, não há diferença para lançar.");
@@ -44,9 +48,14 @@ export function AjusteSaldoModal({ aberto, saldoApp, onFechar, onSalvo }: Props)
     const supabase = createClient();
     const observacao = "Diferença lançada para acertar o saldo com o banco";
 
+    // Uma gravação só, com código único: se a internet cair e a pessoa tocar
+    // de novo, a diferença NÃO é lançada duas vezes (antes a saída era criada
+    // e marcada como paga em 2 passos, e podia ficar pela metade).
     if (diferenca > 0) {
+      const { data: sessao } = await supabase.auth.getSession();
       const { error } = await supabase.from("incomes").insert({
-        user_id: (await supabase.auth.getUser()).data.user?.id,
+        id: chave.current,
+        user_id: sessao.session?.user.id,
         descricao: "Ajuste de saldo",
         categoria_id: null,
         valor_centavos: diferenca,
@@ -54,37 +63,35 @@ export function AjusteSaldoModal({ aberto, saldoApp, onFechar, onSalvo }: Props)
         mes_referencia: mesAtualISO(),
         observacao,
       });
-      if (error) {
+      if (error && !ehDuplicado(error)) {
         setSalvando(false);
-        setErro(error.message);
+        setErro(mensagemDeErro(error));
         return;
       }
     } else {
-      const { data: fonteId, error } = await supabase.rpc("create_simple_expense", {
+      const { error } = await supabase.rpc("criar_conta", {
+        p_chave: chave.current,
+        p_tipo: "simples",
         p_descricao: "Ajuste de saldo",
         p_categoria_id: null,
+        p_grupo_id: null,
+        p_forma_pagamento: null,
+        p_observacao: observacao,
         p_valor_centavos: -diferenca,
         p_vencimento: hojeISO(),
         p_mes_referencia: null,
-        p_forma_pagamento: null,
-        p_observacao: observacao,
+        p_num_parcelas: null,
+        p_dia_vencimento: null,
+        p_pago_em: new Date().toISOString(),
       });
-      if (error || !fonteId) {
+      if (error) {
         setSalvando(false);
-        setErro(error?.message ?? "Não foi possível lançar a diferença.");
+        setErro(mensagemDeErro(error, "Não foi possível lançar a diferença."));
         return;
-      }
-      const { data: parcela } = await supabase
-        .from("expense_installments")
-        .select("id")
-        .eq("source_id", fonteId)
-        .limit(1)
-        .maybeSingle();
-      if (parcela) {
-        await supabase.rpc("mark_installment_paid", { p_installment_id: parcela.id });
       }
     }
 
+    chave.current = novoId();
     setSalvando(false);
     setSaldoBanco("");
     onSalvo();

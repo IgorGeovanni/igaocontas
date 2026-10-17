@@ -4,3 +4,7 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# Função agendada que mantém o Supabase ativo (não deixa pausar por 7 dias sem uso).
+[functions]
+  directory = "netlify/functions"

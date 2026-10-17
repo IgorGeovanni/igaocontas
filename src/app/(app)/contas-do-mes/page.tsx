@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Plus, Layers, Tag } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -13,11 +13,13 @@ import { DeferInstallmentModal } from "@/components/finance/DeferInstallmentModa
 import { EditInstallmentModal } from "@/components/finance/EditInstallmentModal";
 import { PayInstallmentModal } from "@/components/finance/PayInstallmentModal";
 import { NewExpenseModal } from "@/components/finance/NewExpenseModal";
-import { BulkGroupBar } from "@/components/finance/BulkGroupBar";
-import { mensagemErroGrupo } from "@/lib/finance/erros";
+import { BulkGroupBar, type AlteracaoEmLote } from "@/components/finance/BulkGroupBar";
+import { obterOuCriarGrupo } from "@/lib/finance/grupos";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { createClient } from "@/lib/supabase/client";
+import { buscarTodos, emPedacos } from "@/lib/supabase/paginar";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import {
   estaAtrasada,
   inicioDoMesTimestamp,
@@ -34,6 +36,7 @@ type FiltroTipo = "" | TipoFonteDespesa;
 // "Não pagas" e "Atrasadas" não fazem sentido presas a um único mês — quem está devendo
 // quer ver tudo o que falta, então esses dois filtros sempre buscam em todos os meses.
 const SEM_GRUPO = "__sem_grupo";
+const SEM_CATEGORIA = "__sem_categoria";
 
 function statusExigeTodosMeses(status: FiltroStatus) {
   return status === "nao_pagas" || status === "atrasadas";
@@ -68,9 +71,11 @@ function ContasDoMesConteudo() {
   const [aplicandoGrupo, setAplicandoGrupo] = useState(false);
   const [erroSelecao, setErroSelecao] = useState<string | null>(null);
 
-  // "Sem grupo" também olha todos os meses: a ideia é ver tudo que falta classificar
+  // "Sem grupo" e "Sem categoria" também olham todos os meses: a ideia é ver tudo que falta classificar
   const semGrupoAtivo = grupoFiltro === SEM_GRUPO;
-  const modoTodosMeses = verTodosMeses || statusExigeTodosMeses(statusFiltro) || semGrupoAtivo;
+  const semCategoriaAtivo = categoriaFiltro === SEM_CATEGORIA;
+  const modoTodosMeses =
+    verTodosMeses || statusExigeTodosMeses(statusFiltro) || semGrupoAtivo || semCategoriaAtivo;
 
   function alternarSelecao(id: string) {
     setSelecionadas((atual) => {
@@ -87,7 +92,7 @@ function ContasDoMesConteudo() {
     setErroSelecao(null);
   }
 
-  async function aplicarGrupoEmLote(grupoId: string | null, novoGrupo: string) {
+  async function aplicarEmLote({ grupoId, novoGrupo, categoriaId }: AlteracaoEmLote) {
     // só conta o que está visível na lista (filtros podem esconder itens marcados antes)
     const escolhidas = filtradas.filter((p) => selecionadas.has(p.id));
     if (escolhidas.length === 0) return;
@@ -96,26 +101,35 @@ function ContasDoMesConteudo() {
     setErroSelecao(null);
     const supabase = createClient();
 
-    let grupoFinal = grupoId;
+    let grupoFinal: string | null | undefined = grupoId;
     if (novoGrupo.trim()) {
-      const { data: criado, error: erroCriar } = await supabase
-        .from("expense_groups")
-        .insert({ user_id: (await supabase.auth.getUser()).data.user?.id, nome: novoGrupo.trim() })
-        .select("id")
-        .single();
-      if (erroCriar || !criado) {
+      const grupo = await obterOuCriarGrupo(supabase, novoGrupo);
+      if ("erro" in grupo) {
         setAplicandoGrupo(false);
-        setErroSelecao(erroCriar ? mensagemErroGrupo(erroCriar) : "Não foi possível criar o grupo.");
+        setErroSelecao(grupo.erro);
         return;
       }
-      grupoFinal = criado.id;
+      grupoFinal = grupo.id;
     }
 
     const idsContas = Array.from(new Set(escolhidas.map((p) => p.source_id)));
-    const { error } = await supabase
-      .from("expense_sources")
-      .update({ grupo_id: grupoFinal })
-      .in("id", idsContas);
+    const alteracoes: { grupo_id?: string | null; categoria_id?: string | null } = {};
+    if (grupoFinal !== undefined) alteracoes.grupo_id = grupoFinal;
+    if (categoriaId !== undefined) alteracoes.categoria_id = categoriaId;
+    if (Object.keys(alteracoes).length === 0) {
+      setAplicandoGrupo(false);
+      return;
+    }
+
+    // em pedaços: centenas de ids numa única URL estouram o limite do servidor
+    let error: { message: string } | null = null;
+    for (const pedaco of emPedacos(idsContas)) {
+      const res = await supabase.from("expense_sources").update(alteracoes).in("id", pedaco);
+      if (res.error) {
+        error = { message: mensagemDeErro(res.error) };
+        break;
+      }
+    }
 
     setAplicandoGrupo(false);
     if (error) {
@@ -127,40 +141,58 @@ function ContasDoMesConteudo() {
     carregar();
   }
 
+  // Cada carga tem um número: se a pessoa trocar de mês rápido, uma resposta
+  // atrasada do mês anterior não sobrescreve a lista do mês atual.
+  const pedidoAtual = useRef(0);
+
   async function carregar() {
+    const meu = ++pedidoAtual.current;
     setCarregando(true);
     const supabase = createClient();
 
-    // garante que as recorrências ativas já tenham uma ocorrência criada neste mês
-    await supabase.rpc("generate_recurring_installments", { p_mes: mes });
+    try {
+      // garante que as recorrências ativas já tenham uma ocorrência criada neste mês
+      const { error: erroGerar } = await supabase.rpc("generate_recurring_installments", { p_mes: mes });
+      if (erroGerar) throw erroGerar;
 
-    let query = supabase.from("expense_installments").select("*, expense_sources(*)");
-    if (!modoTodosMeses) {
-      query = query.eq("mes_referencia", mes);
+      // Em "todos os meses" a lista pode passar de 1000 contas: busca em páginas
+      // (antes as mais novas sumiam da lista sem aviso).
+      let lista = await buscarTodos<ExpenseInstallmentWithSource>((de, ate) => {
+        let query = supabase.from("expense_installments").select("*, expense_sources(*)");
+        if (!modoTodosMeses) query = query.eq("mes_referencia", mes);
+        return query.order("vencimento_atual", { ascending: true }).order("id").range(de, ate);
+      });
+
+      // Contas de outros meses que foram pagas NESTE mês também aparecem aqui:
+      // mantêm o vencimento do mês de origem, mas contam como pagas no mês do pagamento.
+      if (!modoTodosMeses) {
+        const pagasNoMes = await buscarTodos<ExpenseInstallmentWithSource>((de, ate) =>
+          supabase
+            .from("expense_installments")
+            .select("*, expense_sources(*)")
+            .eq("status", "pago")
+            .gte("pago_em", inicioDoMesTimestamp(mes))
+            .lt("pago_em", inicioDoMesTimestamp(mesSeguinte(mes)))
+            .order("id")
+            .range(de, ate)
+        );
+
+        const idsJaNaLista = new Set(lista.map((p) => p.id));
+        const extras = pagasNoMes.filter((p) => !idsJaNaLista.has(p.id));
+        lista = [...lista, ...extras].sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual));
+      }
+
+      if (meu !== pedidoAtual.current) return;
+      setErroCarga(null);
+      setParcelas(lista);
+    } catch (e) {
+      if (meu !== pedidoAtual.current) return;
+      // não mostra uma lista pela metade: mostra o erro
+      setErroCarga(mensagemDeErro(e));
+      setParcelas([]);
+    } finally {
+      if (meu === pedidoAtual.current) setCarregando(false);
     }
-    const { data, error: erroConsulta } = await query.order("vencimento_atual", { ascending: true });
-    setErroCarga(erroConsulta ? erroConsulta.message : null);
-    let lista = (data as ExpenseInstallmentWithSource[]) ?? [];
-
-    // Contas de outros meses que foram pagas NESTE mês também aparecem aqui:
-    // mantêm o vencimento do mês de origem, mas contam como pagas no mês do pagamento.
-    if (!modoTodosMeses) {
-      const { data: pagasNoMes } = await supabase
-        .from("expense_installments")
-        .select("*, expense_sources(*)")
-        .eq("status", "pago")
-        .gte("pago_em", inicioDoMesTimestamp(mes))
-        .lt("pago_em", inicioDoMesTimestamp(mesSeguinte(mes)));
-
-      const idsJaNaLista = new Set(lista.map((p) => p.id));
-      const extras = ((pagasNoMes as ExpenseInstallmentWithSource[]) ?? []).filter(
-        (p) => !idsJaNaLista.has(p.id)
-      );
-      lista = [...lista, ...extras].sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual));
-    }
-
-    setParcelas(lista);
-    setCarregando(false);
   }
 
   useEffect(() => {
@@ -177,7 +209,9 @@ function ContasDoMesConteudo() {
     if (statusFiltro === "nao_pagas" && p.status !== "pendente") return false;
     if (statusFiltro === "atrasadas" && !atrasada) return false;
     if (tipoFiltro && p.expense_sources.tipo !== tipoFiltro) return false;
-    if (categoriaFiltro && p.expense_sources.categoria_id !== categoriaFiltro) return false;
+    if (categoriaFiltro === SEM_CATEGORIA) {
+      if (p.expense_sources.categoria_id) return false;
+    } else if (categoriaFiltro && p.expense_sources.categoria_id !== categoriaFiltro) return false;
     if (grupoFiltro === SEM_GRUPO) {
       if (p.expense_sources.grupo_id) return false;
     } else if (grupoFiltro && p.expense_sources.grupo_id !== grupoFiltro) return false;
@@ -195,8 +229,10 @@ function ContasDoMesConteudo() {
     .reduce((acc, p) => acc + valorEfetivo(p), 0);
 
   async function desmarcarPago(id: string) {
+    if (!window.confirm("Desfazer o pagamento? A conta volta a ficar como não paga.")) return;
     const supabase = createClient();
-    await supabase.rpc("unmark_installment_paid", { p_installment_id: id });
+    const { error } = await supabase.rpc("unmark_installment_paid", { p_installment_id: id });
+    if (error) window.alert(`Não foi possível desfazer o pagamento: ${mensagemDeErro(error)}`);
     carregar();
   }
 
@@ -230,7 +266,7 @@ function ContasDoMesConteudo() {
 
         <button
           onClick={() => setVerTodosMeses((atual) => !atual)}
-          disabled={statusExigeTodosMeses(statusFiltro) || semGrupoAtivo}
+          disabled={statusExigeTodosMeses(statusFiltro) || semGrupoAtivo || semCategoriaAtivo}
           className={`flex items-center gap-1.5 rounded-pill px-3.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
             modoTodosMeses
               ? "bg-brand-pink text-white"
@@ -301,6 +337,7 @@ function ContasDoMesConteudo() {
           className="w-full rounded-xl border border-base-border bg-base-surface2 px-3 py-2 text-sm outline-none sm:w-auto"
         >
           <option value="">Todas categorias</option>
+          <option value={SEM_CATEGORIA}>Sem categoria</option>
           {categorias.map((c) => (
             <option key={c.id} value={c.id}>
               {c.nome}
@@ -342,12 +379,20 @@ function ContasDoMesConteudo() {
       {carregando ? (
         <p className="text-sm text-ink-muted">Carregando...</p>
       ) : erroCarga ? (
-        <p className="rounded-xl border border-money-out/40 bg-money-out/10 px-4 py-3 text-sm text-money-out">
-          Não foi possível carregar as contas: {erroCarga}
-        </p>
-      ) : filtradas.length === 0 && semGrupoAtivo && parcelas.length > 0 ? (
+        <div className="rounded-xl border border-money-out/40 bg-money-out/10 px-4 py-3 text-sm text-money-out">
+          <p>Não foi possível carregar as contas: {erroCarga}</p>
+          <button
+            onClick={() => carregar()}
+            className="mt-3 rounded-pill bg-brand-pink px-4 py-2 text-xs font-semibold text-white hover:bg-brand-pinkDark"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      ) : filtradas.length === 0 && (semGrupoAtivo || semCategoriaAtivo) && parcelas.length > 0 ? (
         <EmptyState
-          titulo={`Nenhuma conta sem grupo. As ${parcelas.length} contas carregadas já têm grupo. 🎉`}
+          titulo={`Nenhuma conta sem ${
+            semGrupoAtivo && semCategoriaAtivo ? "grupo e categoria" : semGrupoAtivo ? "grupo" : "categoria"
+          } nesse filtro. Foram carregadas ${parcelas.length} contas. 🎉`}
           icone="🏷️"
         />
       ) : filtradas.length === 0 ? (
@@ -405,6 +450,7 @@ function ContasDoMesConteudo() {
       {modoSelecao && (
         <BulkGroupBar
           grupos={grupos}
+          categorias={categorias}
           qtdParcelas={filtradas.filter((p) => selecionadas.has(p.id)).length}
           qtdContas={
             new Set(filtradas.filter((p) => selecionadas.has(p.id)).map((p) => p.source_id)).size
@@ -413,7 +459,7 @@ function ContasDoMesConteudo() {
           erro={erroSelecao}
           onTodas={() => setSelecionadas(new Set(filtradas.map((p) => p.id)))}
           onLimpar={() => setSelecionadas(new Set())}
-          onAplicar={aplicarGrupoEmLote}
+          onAplicar={aplicarEmLote}
           onCancelar={sairDaSelecao}
         />
       )}

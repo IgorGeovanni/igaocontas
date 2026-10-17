@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useGroups } from "@/lib/hooks/useGroups";
-import { mensagemErroGrupo } from "@/lib/finance/erros";
+import { obterOuCriarGrupo } from "@/lib/finance/grupos";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { textoParaCentavos, centavosParaReais, formatarMoeda } from "@/lib/finance/money";
 import { mesReferenciaDeString } from "@/lib/finance/dates";
 import type { ExpenseInstallmentWithSource } from "@/types/database";
@@ -56,17 +57,13 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
     // grupo: usa o escolhido na lista ou cria um novo se foi digitado
     let grupoFinal: string | null = grupoId || null;
     if (novoGrupo.trim()) {
-      const { data: criado, error: erroGrupo } = await supabase
-        .from("expense_groups")
-        .insert({ user_id: (await supabase.auth.getUser()).data.user?.id, nome: novoGrupo.trim() })
-        .select("id")
-        .single();
-      if (erroGrupo || !criado) {
+      const grupo = await obterOuCriarGrupo(supabase, novoGrupo);
+      if ("erro" in grupo) {
         setSalvando(false);
-        setErro(erroGrupo ? mensagemErroGrupo(erroGrupo) : "Não foi possível criar o grupo.");
+        setErro(grupo.erro);
         return;
       }
-      grupoFinal = criado.id;
+      grupoFinal = grupo.id;
     }
     if (grupoFinal !== (parcela!.expense_sources.grupo_id ?? null)) {
       const { error: erroFonte } = await supabase
@@ -75,7 +72,7 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
         .eq("id", parcela!.source_id);
       if (erroFonte) {
         setSalvando(false);
-        setErro(erroFonte.message);
+        setErro(mensagemDeErro(erroFonte));
         return;
       }
     }
@@ -93,7 +90,7 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
 
     setSalvando(false);
     if (error) {
-      setErro(error.message);
+      setErro(mensagemDeErro(error));
       return;
     }
     onSalvo();

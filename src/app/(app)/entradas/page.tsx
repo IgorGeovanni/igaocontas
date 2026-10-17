@@ -12,6 +12,7 @@ import { IncomeFormModal } from "@/components/finance/IncomeFormModal";
 import { useUser } from "@/lib/hooks/useUser";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { createClient } from "@/lib/supabase/client";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { formatarData, mesAtualISO } from "@/lib/finance/dates";
 import type { Income } from "@/types/database";
 
@@ -35,7 +36,8 @@ export default function EntradasPage() {
     let query = supabase.from("incomes").select("*").eq("mes_referencia", mes);
     if (categoriaFiltro) query = query.eq("categoria_id", categoriaFiltro);
     if (busca.trim()) query = query.ilike("descricao", `%${busca.trim()}%`);
-    const { data } = await query.order("data", { ascending: false });
+    const { data, error: erroLista } = await query.order("data", { ascending: false });
+    if (erroLista) window.alert(`Não foi possível carregar: ${mensagemDeErro(erroLista)}`);
     setEntradas((data as Income[]) ?? []);
     setCarregando(false);
   }
@@ -51,7 +53,8 @@ export default function EntradasPage() {
   async function excluir() {
     if (!excluindo) return;
     const supabase = createClient();
-    await supabase.from("incomes").delete().eq("id", excluindo.id);
+    const { error: erroExcluir } = await supabase.from("incomes").delete().eq("id", excluindo.id);
+    if (erroExcluir) window.alert(`Não foi possível excluir: ${mensagemDeErro(erroExcluir)}`);
     setExcluindo(null);
     carregar();
   }

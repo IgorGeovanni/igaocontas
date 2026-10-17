@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { novoId, ehDuplicado } from "@/lib/finance/ids";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { textoParaCentavos, centavosParaReais } from "@/lib/finance/money";
-import { mesReferenciaDeString } from "@/lib/finance/dates";
+import { mesReferenciaDeString, hojeISO } from "@/lib/finance/dates";
 import type { Income } from "@/types/database";
 
 interface Props {
@@ -24,6 +26,8 @@ export function IncomeFormModal({ aberto, userId, entradaEditando, onFechar, onS
   const [observacao, setObservacao] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // código do novo registro: tocar em "Salvar" de novo depois de uma queda de internet não duplica
+  const novoRegistroId = useRef(novoId());
 
   useEffect(() => {
     if (entradaEditando) {
@@ -36,7 +40,8 @@ export function IncomeFormModal({ aberto, userId, entradaEditando, onFechar, onS
       setDescricao("");
       setCategoriaId("");
       setValor("");
-      setData(new Date().toISOString().slice(0, 10));
+      setData(hojeISO()); // data local (antes, depois das 21h já virava o dia seguinte)
+      novoRegistroId.current = novoId();
       setObservacao("");
     }
     setErro(null);
@@ -46,6 +51,7 @@ export function IncomeFormModal({ aberto, userId, entradaEditando, onFechar, onS
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
+    if (salvando) return;
     setErro(null);
 
     const centavos = textoParaCentavos(valor);
@@ -68,11 +74,12 @@ export function IncomeFormModal({ aberto, userId, entradaEditando, onFechar, onS
 
     const resultado = entradaEditando
       ? await supabase.from("incomes").update(payload).eq("id", entradaEditando.id)
-      : await supabase.from("incomes").insert(payload);
+      : await supabase.from("incomes").insert({ ...payload, id: novoRegistroId.current });
 
     setSalvando(false);
-    if (resultado.error) {
-      setErro(resultado.error.message);
+    // "já existe" com o mesmo código = a tentativa anterior chegou ao banco: deu certo
+    if (resultado.error && !(!entradaEditando && ehDuplicado(resultado.error))) {
+      setErro(mensagemDeErro(resultado.error));
       return;
     }
     onSalvo();

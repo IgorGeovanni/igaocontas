@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { novoId, ehDuplicado } from "@/lib/finance/ids";
+import { hojeISO } from "@/lib/finance/dates";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { textoParaCentavos, centavosParaReais } from "@/lib/finance/money";
 import type { SavingsEntry, TipoGuardado } from "@/types/database";
 
@@ -22,6 +25,8 @@ export function SavingsFormModal({ aberto, userId, itemEditando, onFechar, onSal
   const [observacao, setObservacao] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // código do novo registro: tocar em "Salvar" de novo depois de uma queda de internet não duplica
+  const novoRegistroId = useRef(novoId());
 
   useEffect(() => {
     if (itemEditando) {
@@ -36,7 +41,8 @@ export function SavingsFormModal({ aberto, userId, itemEditando, onFechar, onSal
       setTipo("guardado");
       setValor("");
       setLocal("");
-      setData(new Date().toISOString().slice(0, 10));
+      setData(hojeISO()); // data local (antes, depois das 21h já virava o dia seguinte)
+      novoRegistroId.current = novoId();
       setObservacao("");
     }
     setErro(null);
@@ -46,6 +52,7 @@ export function SavingsFormModal({ aberto, userId, itemEditando, onFechar, onSal
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
+    if (salvando) return;
     setErro(null);
 
     const centavos = textoParaCentavos(valor);
@@ -68,11 +75,12 @@ export function SavingsFormModal({ aberto, userId, itemEditando, onFechar, onSal
 
     const resultado = itemEditando
       ? await supabase.from("savings_entries").update(payload).eq("id", itemEditando.id)
-      : await supabase.from("savings_entries").insert(payload);
+      : await supabase.from("savings_entries").insert({ ...payload, id: novoRegistroId.current });
 
     setSalvando(false);
-    if (resultado.error) {
-      setErro(resultado.error.message);
+    // "já existe" com o mesmo código = a tentativa anterior chegou ao banco: deu certo
+    if (resultado.error && !(!itemEditando && ehDuplicado(resultado.error))) {
+      setErro(mensagemDeErro(resultado.error));
       return;
     }
     onSalvo();

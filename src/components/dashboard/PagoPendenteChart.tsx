@@ -8,16 +8,17 @@ import { useValueVisibility } from "@/components/ValueVisibilityContext";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { createClient } from "@/lib/supabase/client";
-import { mesDoPagamento } from "@/lib/finance/dates";
-import { formatarMoeda, valorEfetivo } from "@/lib/finance/money";
+import { inicioDoMesTimestamp, mesSeguinte } from "@/lib/finance/dates";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
+import { formatarMoeda } from "@/lib/finance/money";
 
+// Somas já agrupadas pelo banco (por categoria e por grupo, todos os meses e só o mês).
 interface Linha {
-  status: "pendente" | "pago";
-  valor_centavos: number;
-  juros_centavos: number | null;
-  pago_em: string | null;
-  mes_referencia: string;
-  expense_sources: { categoria_id: string | null; grupo_id: string | null } | null;
+  agrupar: "categoria" | "grupo";
+  chave: string | null;
+  periodo: "tudo" | "mes";
+  pago: number;
+  pendente: number;
 }
 
 type Agrupar = "categoria" | "grupo";
@@ -27,24 +28,18 @@ const COR_PAGO = "#22C55E";
 const COR_PENDENTE = "#FF6B4A";
 const MAX_BARRAS = 8;
 
-// Busca todas as parcelas em páginas (o Supabase limita 1000 linhas por consulta).
-async function buscarTodas(): Promise<Linha[]> {
+// Antes baixava TODAS as parcelas a cada abertura do Dashboard (pesado no
+// celular e, se uma página falhasse, o gráfico saía incompleto sem aviso).
+// Agora o banco devolve só as somas.
+async function buscarResumo(mes: string): Promise<Linha[]> {
   const supabase = createClient();
-  const todas: Linha[] = [];
-  const tamanho = 1000;
-  for (let pagina = 0; pagina < 10; pagina++) {
-    const { data, error } = await supabase
-      .from("expense_installments")
-      .select(
-        "status, valor_centavos, juros_centavos, pago_em, mes_referencia, expense_sources(categoria_id, grupo_id)"
-      )
-      .order("id", { ascending: true })
-      .range(pagina * tamanho, (pagina + 1) * tamanho - 1);
-    if (error || !data) break;
-    todas.push(...(data as unknown as Linha[]));
-    if (data.length < tamanho) break;
-  }
-  return todas;
+  const { data, error } = await supabase.rpc("pago_pendente_resumo", {
+    p_mes: mes,
+    p_ts_ini: inicioDoMesTimestamp(mes),
+    p_ts_fim: inicioDoMesTimestamp(mesSeguinte(mes)),
+  });
+  if (error) throw error;
+  return ((data ?? []) as Linha[]).map((l) => ({ ...l, pago: Number(l.pago), pendente: Number(l.pendente) }));
 }
 
 export function PagoPendenteChart({ mes }: { mes: string }) {
@@ -56,9 +51,18 @@ export function PagoPendenteChart({ mes }: { mes: string }) {
   const [agrupar, setAgrupar] = useState<Agrupar>("categoria");
   const [periodo, setPeriodo] = useState<Periodo>("tudo");
 
+  const [erro, setErro] = useState<string | null>(null);
+
   useEffect(() => {
-    buscarTodas().then(setLinhas);
-  }, []);
+    let ativo = true;
+    setErro(null);
+    buscarResumo(mes)
+      .then((l) => ativo && setLinhas(l))
+      .catch((e) => ativo && setErro(mensagemDeErro(e)));
+    return () => {
+      ativo = false;
+    };
+  }, [mes]);
 
   const dados = useMemo(() => {
     if (!linhas) return [];
@@ -69,17 +73,11 @@ export function PagoPendenteChart({ mes }: { mes: string }) {
 
     const mapa = new Map<string, { nome: string; pago: number; pendente: number }>();
     for (const l of linhas) {
-      const entra =
-        periodo === "tudo" ||
-        (l.status === "pago" ? mesDoPagamento(l.pago_em) === mes : l.mes_referencia === mes);
-      if (!entra) continue;
-
-      const id =
-        (agrupar === "categoria" ? l.expense_sources?.categoria_id : l.expense_sources?.grupo_id) ?? "";
-      const nome = id ? nomes.get(id)?.nome ?? semNome : semNome;
+      if (l.agrupar !== agrupar || l.periodo !== periodo) continue;
+      const nome = l.chave ? nomes.get(l.chave)?.nome ?? semNome : semNome;
       const atual = mapa.get(nome) ?? { nome, pago: 0, pendente: 0 };
-      if (l.status === "pago") atual.pago += valorEfetivo(l);
-      else atual.pendente += valorEfetivo(l);
+      atual.pago += l.pago;
+      atual.pendente += l.pendente;
       mapa.set(nome, atual);
     }
 
@@ -124,7 +122,9 @@ export function PagoPendenteChart({ mes }: { mes: string }) {
         </div>
       </div>
 
-      {!linhas ? (
+      {erro ? (
+        <p className="text-sm text-money-out">Não foi possível carregar o gráfico: {erro}</p>
+      ) : !linhas ? (
         <p className="text-sm text-ink-muted">Carregando...</p>
       ) : dados.length === 0 ? (
         <p className="text-sm text-ink-muted">Sem contas para mostrar nesse filtro.</p>

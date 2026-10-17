@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Pencil, Power } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
@@ -12,6 +12,8 @@ import { EditExpenseSourceModal } from "@/components/finance/EditExpenseSourceMo
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { createClient } from "@/lib/supabase/client";
+import { buscarTodos, emPedacos } from "@/lib/supabase/paginar";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { formatarData } from "@/lib/finance/dates";
 import { valorEfetivo } from "@/lib/finance/money";
 import type { ExpenseSource } from "@/types/database";
@@ -38,35 +40,50 @@ export default function SaidasPage() {
   const [editando, setEditando] = useState<ExpenseSource | null>(null);
   const [excluindo, setExcluindo] = useState<ExpenseSource | null>(null);
 
+  const [erroCarga, setErroCarga] = useState<string | null>(null);
+  const pedidoAtual = useRef(0);
+
   async function carregar() {
+    const meu = ++pedidoAtual.current;
     setCarregando(true);
     const supabase = createClient();
-    let query = supabase.from("expense_sources").select("*");
-    if (tipoFiltro) query = query.eq("tipo", tipoFiltro);
-    if (categoriaFiltro) query = query.eq("categoria_id", categoriaFiltro);
-    if (grupoFiltro) query = query.eq("grupo_id", grupoFiltro);
-    if (busca.trim()) query = query.ilike("descricao", `%${busca.trim()}%`);
-    const { data } = await query.order("criado_em", { ascending: false });
-    const listaFontes = (data as ExpenseSource[]) ?? [];
-    setFontes(listaFontes);
-
-    // contas avulsas não guardam o valor na fonte — ele vive na única parcela gerada
-    const idsAvulsas = listaFontes.filter((f) => f.tipo === "simples").map((f) => f.id);
-    if (idsAvulsas.length > 0) {
-      const { data: parcelas } = await supabase
-        .from("expense_installments")
-        .select("source_id, valor_centavos, juros_centavos")
-        .in("source_id", idsAvulsas);
-      const mapa: Record<string, number> = {};
-      (parcelas ?? []).forEach((p) => {
-        mapa[p.source_id] = valorEfetivo(p);
+    try {
+      const listaFontes = await buscarTodos<ExpenseSource>((de, ate) => {
+        let query = supabase.from("expense_sources").select("*");
+        if (tipoFiltro) query = query.eq("tipo", tipoFiltro);
+        if (categoriaFiltro) query = query.eq("categoria_id", categoriaFiltro);
+        if (grupoFiltro) query = query.eq("grupo_id", grupoFiltro);
+        if (busca.trim()) query = query.ilike("descricao", `%${busca.trim().replace(/[%_]/g, "")}%`);
+        return query.order("criado_em", { ascending: false }).order("id").range(de, ate);
       });
-      setValoresAvulsas(mapa);
-    } else {
-      setValoresAvulsas({});
-    }
 
-    setCarregando(false);
+      // contas avulsas não guardam o valor na fonte — ele vive na parcela gerada.
+      // Busca em pedaços (muitos ids numa URL só dão erro) e SOMA as partes:
+      // depois de um pagamento parcial a conta fica dividida em 2 linhas.
+      const idsAvulsas = listaFontes.filter((f) => f.tipo === "simples").map((f) => f.id);
+      const mapa: Record<string, number> = {};
+      for (const pedaco of emPedacos(idsAvulsas)) {
+        const { data: parcelas, error } = await supabase
+          .from("expense_installments")
+          .select("source_id, valor_centavos, juros_centavos")
+          .in("source_id", pedaco);
+        if (error) throw error;
+        (parcelas ?? []).forEach((p) => {
+          mapa[p.source_id] = (mapa[p.source_id] ?? 0) + valorEfetivo(p);
+        });
+      }
+
+      if (meu !== pedidoAtual.current) return;
+      setFontes(listaFontes);
+      setValoresAvulsas(mapa);
+      setErroCarga(null);
+    } catch (e) {
+      if (meu !== pedidoAtual.current) return;
+      setErroCarga(mensagemDeErro(e));
+      setFontes([]);
+    } finally {
+      if (meu === pedidoAtual.current) setCarregando(false);
+    }
   }
 
   useEffect(() => {
@@ -80,14 +97,16 @@ export default function SaidasPage() {
   async function excluir() {
     if (!excluindo) return;
     const supabase = createClient();
-    await supabase.from("expense_sources").delete().eq("id", excluindo.id);
+    const { error } = await supabase.from("expense_sources").delete().eq("id", excluindo.id);
     setExcluindo(null);
+    if (error) window.alert(`Não foi possível excluir: ${mensagemDeErro(error)}`);
     carregar();
   }
 
   async function alternarRecorrencia(fonte: ExpenseSource) {
     const supabase = createClient();
-    await supabase.rpc("set_recurring_active", { p_source_id: fonte.id, p_ativo: !fonte.ativo });
+    const { error } = await supabase.rpc("set_recurring_active", { p_source_id: fonte.id, p_ativo: !fonte.ativo });
+    if (error) window.alert(`Não foi possível alterar a recorrência: ${mensagemDeErro(error)}`);
     carregar();
   }
 
@@ -213,6 +232,16 @@ export default function SaidasPage() {
 
       {carregando ? (
         <p className="text-sm text-ink-muted">Carregando...</p>
+      ) : erroCarga ? (
+        <div className="rounded-xl border border-money-out/40 bg-money-out/10 px-4 py-3 text-sm text-money-out">
+          <p>Não foi possível carregar as contas: {erroCarga}</p>
+          <button
+            onClick={() => carregar()}
+            className="mt-3 rounded-pill bg-brand-pink px-4 py-2 text-xs font-semibold text-white hover:bg-brand-pinkDark"
+          >
+            Tentar de novo
+          </button>
+        </div>
       ) : fontes.length === 0 ? (
         <EmptyState titulo="Você ainda não cadastrou nenhuma conta." icone="🧾" />
       ) : (

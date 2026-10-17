@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { rotuloMes, mesSeguinte } from "@/lib/finance/dates";
 import type { ExpenseInstallment } from "@/types/database";
 
@@ -13,20 +14,29 @@ interface Props {
 
 export function DeferInstallmentModal({ parcela, onFechar, onConcluido }: Props) {
   const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
 
   if (!parcela) return null;
 
   const proximoMes = rotuloMes(mesSeguinte(parcela.mes_referencia));
 
   async function escolher(tipo: "adiamento" | "duas_parcelas_proximo_mes") {
+    if (salvando) return;
     setSalvando(true);
+    setErro(null);
     const supabase = createClient();
-    await supabase.rpc("defer_installment", {
+    const { error } = await supabase.rpc("defer_installment", {
       p_installment_id: parcela!.id,
       p_tipo: tipo,
       p_meses: 1,
+      // mês em que a conta está agora: se ela já foi adiada (2º toque), o banco não adia de novo
+      p_mes_esperado: parcela!.mes_referencia,
     });
     setSalvando(false);
+    if (error) {
+      setErro(mensagemDeErro(error));
+      return;
+    }
     onConcluido();
   }
 
@@ -62,8 +72,13 @@ export function DeferInstallmentModal({ parcela, onFechar, onConcluido }: Props)
           </button>
         </div>
 
+        {erro && <p className="mt-3 text-sm text-money-out">{erro}</p>}
+
         <button
-          onClick={onFechar}
+          onClick={() => {
+            setErro(null);
+            onFechar();
+          }}
           disabled={salvando}
           className="mt-4 w-full rounded-xl border border-base-border py-2.5 text-sm font-medium hover:bg-base-surface2"
         >

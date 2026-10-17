@@ -7,6 +7,7 @@ import { PrintableReport } from "@/components/finance/PrintableReport";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { carregarRelatorio, type ReportData } from "@/lib/finance/reportData";
 import { mesAtualISO } from "@/lib/finance/dates";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 
 type Modo = "mes" | "personalizado";
 
@@ -33,20 +34,32 @@ export default function RelatoriosPage() {
   const inicioEfetivo = modo === "mes" ? mesUnico : mesInicio;
   const fimEfetivo = modo === "mes" ? mesUnico : mesFim;
 
+  const [erro, setErro] = useState<string | null>(null);
+  const [tentativa, setTentativa] = useState(0);
+
   useEffect(() => {
     let ativo = true;
     setCarregando(true);
-    carregarRelatorio(inicioEfetivo, fimEfetivo).then((d) => {
-      if (ativo) {
-        setDados(d);
-        setCarregando(false);
-      }
-    });
+    setErro(null);
+    carregarRelatorio(inicioEfetivo, fimEfetivo)
+      .then((d) => {
+        if (ativo) setDados(d);
+      })
+      .catch((e) => {
+        // relatório incompleto não é mostrado (nem impresso)
+        if (ativo) {
+          setDados(null);
+          setErro(mensagemDeErro(e));
+        }
+      })
+      .finally(() => {
+        if (ativo) setCarregando(false);
+      });
     return () => {
       ativo = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inicioEfetivo, fimEfetivo]);
+  }, [inicioEfetivo, fimEfetivo, tentativa]);
 
   function categoriaNome(id: string | null) {
     return (
@@ -128,7 +141,17 @@ export default function RelatoriosPage() {
         />
       </div>
 
-      {carregando || !dados ? (
+      {erro && !carregando ? (
+        <div className="rounded-xl border border-money-out/40 bg-money-out/10 px-4 py-3 text-sm text-money-out">
+          <p>Não foi possível montar o relatório: {erro}</p>
+          <button
+            onClick={() => setTentativa((t) => t + 1)}
+            className="mt-3 rounded-pill bg-brand-pink px-4 py-2 text-xs font-semibold text-white hover:bg-brand-pinkDark"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      ) : carregando || !dados ? (
         <p className="text-sm text-ink-muted">Carregando...</p>
       ) : (
         <PrintableReport

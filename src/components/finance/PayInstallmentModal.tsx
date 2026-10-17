@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { textoParaCentavos, centavosParaReais, formatarMoeda, valorEfetivo } from "@/lib/finance/money";
 import { rotuloMes, mesSeguinte } from "@/lib/finance/dates";
 import type { ExpenseInstallmentWithSource } from "@/types/database";
@@ -50,6 +51,7 @@ export function PayInstallmentModal({ parcela, onFechar, onConcluido }: Props) {
 
   async function confirmar(e: React.FormEvent) {
     e.preventDefault();
+    if (salvando) return;
     setErro(null);
 
     if (valorPagoCentavos <= 0) {
@@ -67,8 +69,9 @@ export function PayInstallmentModal({ parcela, onFechar, onConcluido }: Props) {
     });
 
     setSalvando(false);
-    if (error) {
-      setErro(error.message);
+    // "já está paga" depois de uma queda de internet = o 1º toque chegou ao banco
+    if (error && !/já está paga/i.test(error.message ?? "")) {
+      setErro(mensagemDeErro(error));
       return;
     }
     onConcluido();

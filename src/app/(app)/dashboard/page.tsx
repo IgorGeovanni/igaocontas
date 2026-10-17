@@ -26,6 +26,7 @@ import { PagoPendenteChart } from "@/components/dashboard/PagoPendenteChart";
 import { carregarDashboard, type DashboardData } from "@/lib/finance/dashboardData";
 import { mesAtualISO, formatarDataCurta } from "@/lib/finance/dates";
 import { variacaoPercentual, valorEfetivo } from "@/lib/finance/money";
+import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 
 export default function DashboardPage() {
   const [mes, setMes] = useState(mesAtualISO());
@@ -33,16 +34,26 @@ export default function DashboardPage() {
   const [carregando, setCarregando] = useState(true);
   const [versao, setVersao] = useState(0);
   const [modalAjuste, setModalAjuste] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     let ativo = true;
     setCarregando(true);
-    carregarDashboard(mes).then((d) => {
-      if (ativo) {
-        setDados(d);
-        setCarregando(false);
-      }
-    });
+    setErro(null);
+    carregarDashboard(mes)
+      .then((d) => {
+        if (ativo) setDados(d);
+      })
+      .catch((e) => {
+        // nunca mostra números de uma carga incompleta
+        if (ativo) {
+          setDados(null);
+          setErro(mensagemDeErro(e));
+        }
+      })
+      .finally(() => {
+        if (ativo) setCarregando(false);
+      });
     return () => {
       ativo = false;
     };
@@ -56,7 +67,17 @@ export default function DashboardPage() {
         <MonthSwitcher mes={mes} onChange={setMes} />
       </div>
 
-      {carregando || !dados ? (
+      {erro && !carregando ? (
+        <div className="rounded-xl border border-money-out/40 bg-money-out/10 px-4 py-3 text-sm text-money-out">
+          <p>Não foi possível carregar o Dashboard: {erro}</p>
+          <button
+            onClick={() => setVersao((v) => v + 1)}
+            className="mt-3 rounded-pill bg-brand-pink px-4 py-2 text-xs font-semibold text-white hover:bg-brand-pinkDark"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      ) : carregando || !dados ? (
         <p className="text-sm text-ink-muted">Carregando...</p>
       ) : (
         <div className="space-y-6">
