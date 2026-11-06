@@ -9,6 +9,7 @@ import {
   rotuloMesCurto,
 } from "@/lib/finance/dates";
 import { valorEfetivo } from "@/lib/finance/money";
+import { importantesPrimeiro } from "@/lib/finance/importante";
 import { subMonths } from "date-fns";
 import type { ExpenseInstallment, ExpenseSource, Income } from "@/types/database";
 
@@ -61,6 +62,8 @@ export interface DashboardData {
 
   proximasContas: ExpenseInstallment[];
   contasAtrasadas: ExpenseInstallment[];
+  // ids das CONTAS marcadas como importantes (para mostrar a estrela nas listas acima)
+  contasImportantesIds: string[];
   contasAcabando: ContaAcabando[];
 
   evolucao: EvolucaoMes[];
@@ -119,8 +122,8 @@ export async function carregarDashboard(mes: string): Promise<DashboardData> {
         .order("id")
         .range(de, ate)
     ),
-    buscarTodos<Pick<ExpenseSource, "id" | "descricao" | "categoria_id" | "tipo">>((de, ate) =>
-      supabase.from("expense_sources").select("id, descricao, categoria_id, tipo").order("id").range(de, ate)
+    buscarTodos<Pick<ExpenseSource, "id" | "descricao" | "categoria_id" | "tipo" | "importante">>((de, ate) =>
+      supabase.from("expense_sources").select("id, descricao, categoria_id, tipo, importante").order("id").range(de, ate)
     ),
     // busca SEM limite de janela: uma conta atrasada nunca deve "desaparecer" por ser antiga
     buscarTodos<ExpenseInstallment>((de, ate) =>
@@ -174,12 +177,20 @@ export async function carregarDashboard(mes: string): Promise<DashboardData> {
     .filter((i) => i.status === "pendente")
     .reduce((acc, i) => acc + (i.juros_centavos || 0), 0);
 
-  const proximasContas = doMes
-    .filter((i) => i.status === "pendente" && i.vencimento_atual >= hoje)
-    .sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual))
-    .slice(0, 5);
+  // contas marcadas como importantes vêm primeiro; dentro de cada bloco, por vencimento
+  const ehImportante = (i: ExpenseInstallment) => !!sourceById.get(i.source_id)?.importante;
 
-  const contasAtrasadas = [...atrasadas].sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual));
+  const proximasContas = importantesPrimeiro(
+    doMes
+      .filter((i) => i.status === "pendente" && i.vencimento_atual >= hoje)
+      .sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual)),
+    ehImportante
+  ).slice(0, 5);
+
+  const contasAtrasadas = importantesPrimeiro(
+    [...atrasadas].sort((a, b) => a.vencimento_atual.localeCompare(b.vencimento_atual)),
+    ehImportante
+  );
 
   // ---- Total devido (todos os meses), fluxo de caixa e saldo bancário: vêm somados do banco ----
   const totalDevidoGeral = Number(r.pendente_total);
@@ -266,6 +277,7 @@ export async function carregarDashboard(mes: string): Promise<DashboardData> {
     totalPagoGeral,
     proximasContas,
     contasAtrasadas,
+    contasImportantesIds: sources.filter((src) => src.importante).map((src) => src.id),
     contasAcabando,
     evolucao,
     despesasPorCategoria,

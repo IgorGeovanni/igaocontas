@@ -52,6 +52,7 @@ export interface ExpenseSource {
   descricao: string;
   categoria_id: string | null;
   grupo_id: string | null;
+  importante: boolean;
   tipo: TipoFonteDespesa;
   forma_pagamento: string | null;
   observacao: string | null;

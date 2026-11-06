@@ -2,9 +2,10 @@
  * MANTER O SUPABASE ATIVO (função agendada da Netlify)
  *
  * O plano gratuito do Supabase pausa o projeto depois de 7 dias sem atividade.
- * Esta função roda SOZINHA uma vez por dia e chama a função "ping" do banco
- * (criada na migration supabase/migrations/0010_seguranca_desempenho.sql), que só
- * devolve o número 1: não lê nem grava nenhum dado do sistema.
+ * Esta função roda SOZINHA 2 vezes por dia e chama a função "ping" do banco
+ * (arquivo supabase/migrations/0012_ping_atividade.sql), que
+ * atualiza 1 linha da tabelinha "keep_alive" (data/hora do último ping). Isso conta como atividade
+ * real no banco e não mexe em nenhum dado do sistema.
  *
  * Usa as variáveis NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY já cadastradas
  * na Netlify. Resultado em Netlify → Logs → Functions → manter-supabase-ativo.
@@ -47,5 +48,5 @@ export default async function manterSupabaseAtivo() {
   return new Response('Falha ao contatar o Supabase', { status: 502 });
 }
 
-// Todo dia às 09:00 UTC (06:00 de Brasília).
-export const config = { schedule: '0 9 * * *' };
+// 2 vezes por dia: 09:00 e 21:00 UTC (06:00 e 18:00 de Brasília).
+export const config = { schedule: '0 9,21 * * *' };

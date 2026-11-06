@@ -11,6 +11,7 @@ import {
   Landmark,
   BadgeDollarSign,
   Info,
+  Star,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -276,7 +277,12 @@ export default function DashboardPage() {
                 <ul className="space-y-2.5">
                   {dados.proximasContas.map((c) => (
                     <li key={c.id} className="flex items-center justify-between text-sm">
-                      <span>Vence {formatarDataCurta(c.vencimento_atual)}</span>
+                      <span className="flex items-center gap-1.5">
+                        {dados.contasImportantesIds.includes(c.source_id) && (
+                          <Star size={13} fill="currentColor" className="shrink-0 text-violet-300" aria-label="Importante" />
+                        )}
+                        Vence {formatarDataCurta(c.vencimento_atual)}
+                      </span>
                       <Money centavos={valorEfetivo(c)} className="font-tabular font-medium" />
                     </li>
                   ))}
@@ -295,7 +301,10 @@ export default function DashboardPage() {
                 <ul className="space-y-2.5">
                   {dados.contasAtrasadas.slice(0, 5).map((c) => (
                     <li key={c.id} className="flex items-center justify-between text-sm">
-                      <span className="text-money-out">
+                      <span className="flex items-center gap-1.5 text-money-out">
+                        {dados.contasImportantesIds.includes(c.source_id) && (
+                          <Star size={13} fill="currentColor" className="shrink-0 text-violet-300" aria-label="Importante" />
+                        )}
                         Venceu {formatarDataCurta(c.vencimento_atual)}
                       </span>
                       <Money centavos={valorEfetivo(c)} className="font-tabular font-medium" />

@@ -262,6 +262,9 @@ export function mensagemDeErro(erro: unknown, padrao = 'Não foi possível concl
   if (!erro) return padrao;
   if (ehErroDeRede(erro)) return 'Sem conexão com a internet (ou muito lenta). Confira o sinal e tente de novo.';
   const e = erro as { message?: string; code?: string };
+  if (e.code === 'PGRST204' && /importante/i.test(e.message ?? '')) {
+    return 'O banco ainda não foi atualizado: rode a migration 0011_conta_importante.sql no SQL Editor do Supabase.';
+  }
   if (e.code === 'PGRST202' || /could not find the function/i.test(e.message ?? '')) {
     return 'O banco ainda não foi atualizado: rode a migration 0010_seguranca_desempenho.sql no SQL Editor do Supabase.';
   }

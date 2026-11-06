@@ -8,6 +8,7 @@ export interface AlteracaoEmLote {
   grupoId?: string | null;
   novoGrupo: string;
   categoriaId?: string | null;
+  importante?: boolean;
 }
 
 interface Props {
@@ -24,6 +25,8 @@ interface Props {
 }
 
 const REMOVER = "__remover";
+const MARCAR = "__marcar";
+const DESMARCAR = "__desmarcar";
 
 const estiloSelect =
   "w-full rounded-xl border border-base-border bg-base-surface2 px-3 py-2 text-sm outline-none focus:border-brand-pink";
@@ -44,8 +47,10 @@ export function BulkGroupBar({
   const [grupoSel, setGrupoSel] = useState("");
   const [novoGrupo, setNovoGrupo] = useState("");
   const [categoriaSel, setCategoriaSel] = useState("");
+  const [importanteSel, setImportanteSel] = useState("");
 
-  const algumaMudanca = grupoSel !== "" || novoGrupo.trim() !== "" || categoriaSel !== "";
+  const algumaMudanca =
+    grupoSel !== "" || novoGrupo.trim() !== "" || categoriaSel !== "" || importanteSel !== "";
   const podeAplicar = qtdParcelas > 0 && algumaMudanca;
 
   function aplicar() {
@@ -53,6 +58,7 @@ export function BulkGroupBar({
       grupoId: grupoSel === "" ? undefined : grupoSel === REMOVER ? null : grupoSel,
       novoGrupo,
       categoriaId: categoriaSel === "" ? undefined : categoriaSel === REMOVER ? null : categoriaSel,
+      importante: importanteSel === "" ? undefined : importanteSel === MARCAR,
     });
   }
 
@@ -114,6 +120,15 @@ export function BulkGroupBar({
               </option>
             ))}
             <option value={REMOVER}>Tirar da categoria (sem categoria)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs text-ink-muted">Importante</label>
+          <select value={importanteSel} onChange={(e) => setImportanteSel(e.target.value)} className={estiloSelect}>
+            <option value="">Não alterar</option>
+            <option value={MARCAR}>Marcar como importante</option>
+            <option value={DESMARCAR}>Tirar a marca de importante</option>
           </select>
         </div>
       </div>

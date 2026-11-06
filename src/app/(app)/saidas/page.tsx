@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Pencil, Power } from "lucide-react";
+import { Plus, Trash2, Pencil, Power, Star } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/client";
 import { buscarTodos, emPedacos } from "@/lib/supabase/paginar";
 import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 import { formatarData } from "@/lib/finance/dates";
+import { definirImportante, importantesPrimeiro } from "@/lib/finance/importante";
 import { valorEfetivo } from "@/lib/finance/money";
 import type { ExpenseSource } from "@/types/database";
 
@@ -74,7 +75,7 @@ export default function SaidasPage() {
       }
 
       if (meu !== pedidoAtual.current) return;
-      setFontes(listaFontes);
+      setFontes(importantesPrimeiro(listaFontes, (f) => !!f.importante));
       setValoresAvulsas(mapa);
       setErroCarga(null);
     } catch (e) {
@@ -101,6 +102,24 @@ export default function SaidasPage() {
     setExcluindo(null);
     if (error) window.alert(`Não foi possível excluir: ${mensagemDeErro(error)}`);
     carregar();
+  }
+
+  // Marca/desmarca já na tela e grava; se não gravar, volta como estava.
+  async function alternarImportante(fonte: ExpenseSource) {
+    const novoValor = !fonte.importante;
+    const mudar = (valor: boolean) =>
+      setFontes((lista) =>
+        importantesPrimeiro(
+          lista.map((f) => (f.id === fonte.id ? { ...f, importante: valor } : f)),
+          (f) => !!f.importante
+        )
+      );
+    mudar(novoValor);
+    const erro = await definirImportante(createClient(), [fonte.id], novoValor);
+    if (erro) {
+      mudar(!novoValor);
+      window.alert(`Não foi possível ${novoValor ? "marcar" : "desmarcar"} como importante: ${erro}`);
+    }
   }
 
   async function alternarRecorrencia(fonte: ExpenseSource) {
@@ -247,10 +266,20 @@ export default function SaidasPage() {
       ) : (
         <div className="space-y-2.5">
           {fontes.map((fonte) => (
-            <Card key={fonte.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <Card
+              key={fonte.id}
+              className={`flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between ${
+                fonte.importante ? "!border-violet-400/60" : ""
+              }`}
+            >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="truncate font-medium">{fonte.descricao}</p>
+                  {fonte.importante && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-pill bg-violet-400/15 px-2 py-0.5 text-[11px] font-semibold text-violet-300">
+                      <Star size={11} fill="currentColor" /> Importante
+                    </span>
+                  )}
                   <span className="shrink-0 rounded-pill bg-base-surface2 px-2 py-0.5 text-[11px] text-ink-muted">
                     {ROTULO_TIPO[fonte.tipo]}
                   </span>
@@ -280,6 +309,22 @@ export default function SaidasPage() {
                     <Power size={16} />
                   </button>
                 )}
+                <button
+                  onClick={() => alternarImportante(fonte)}
+                  aria-pressed={!!fonte.importante}
+                  title={
+                    fonte.importante
+                      ? "Tirar a marca de importante"
+                      : fonte.tipo === "recorrente"
+                        ? "Marcar como importante (vale para todos os meses)"
+                        : "Marcar como importante"
+                  }
+                  className={`rounded-full p-2 hover:bg-base-surface2 ${
+                    fonte.importante ? "text-violet-300" : "text-ink-muted hover:text-ink-primary"
+                  }`}
+                >
+                  <Star size={16} fill={fonte.importante ? "currentColor" : "none"} />
+                </button>
                 <button
                   onClick={() => setEditando(fonte)}
                   className="rounded-full p-2 text-ink-muted hover:bg-base-surface2 hover:text-ink-primary"

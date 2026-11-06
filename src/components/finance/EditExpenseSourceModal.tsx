@@ -20,6 +20,7 @@ export function EditExpenseSourceModal({ fonte, onFechar, onSalvo }: Props) {
   const [descricao, setDescricao] = useState("");
   const [categoriaId, setCategoriaId] = useState("");
   const [grupoId, setGrupoId] = useState("");
+  const [importante, setImportante] = useState(false);
   const [formaPagamento, setFormaPagamento] = useState("");
   const [observacao, setObservacao] = useState("");
   const [diaVencimento, setDiaVencimento] = useState("");
@@ -32,6 +33,7 @@ export function EditExpenseSourceModal({ fonte, onFechar, onSalvo }: Props) {
       setDescricao(fonte.descricao);
       setCategoriaId(fonte.categoria_id ?? "");
       setGrupoId(fonte.grupo_id ?? "");
+      setImportante(!!fonte.importante);
       setFormaPagamento(fonte.forma_pagamento ?? "");
       setObservacao(fonte.observacao ?? "");
       setDiaVencimento(fonte.dia_vencimento ? String(fonte.dia_vencimento) : "");
@@ -63,6 +65,7 @@ export function EditExpenseSourceModal({ fonte, onFechar, onSalvo }: Props) {
         descricao: descricao.trim(),
         categoria_id: categoriaId || null,
         grupo_id: grupoId || null,
+        importante,
         forma_pagamento: formaPagamento || null,
         observacao: observacao || null,
         ...(recorrente ? { dia_vencimento: dia } : {}),
@@ -162,6 +165,24 @@ export function EditExpenseSourceModal({ fonte, onFechar, onSalvo }: Props) {
               Novos grupos são criados em Configurações ou ao cadastrar uma conta nova.
             </p>
           </div>
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-base-border bg-base-surface2 px-4 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={importante}
+              onChange={(e) => setImportante(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-pink"
+            />
+            <span>
+              Conta importante
+              <span className="block text-xs text-ink-muted">
+                {fonte.tipo === "recorrente"
+                  ? "Aparece primeiro nas listas, em todos os meses (inclusive os próximos)."
+                  : fonte.tipo === "parcelado"
+                    ? "Aparece primeiro nas listas, em todas as parcelas."
+                    : "Aparece primeiro nas listas."}
+              </span>
+            </span>
+          </label>
           {fonte.tipo === "recorrente" && (
             <div>
               <label className="mb-1 block text-xs text-ink-muted">Dia do vencimento (todo mês)</label>

@@ -42,6 +42,8 @@ igao-contas/
    8. `0008_guardado_investido.sql` — tabela de dinheiro guardado/investido (tela "Guardado")
    9. `0009_grupos.sql` — grupos de contas (ex: SAAEB, CPFL, nome de uma pessoa)
    10. `0010_seguranca_desempenho.sql` — correções (recorrência duplicada, totais acima de 1000 lançamentos, salvar com internet ruim) e o "ping" que mantém o Supabase ativo. Seguro rodar com dados já cadastrados.
+   11. `0011_conta_importante.sql` — tag "Importante" nas contas (1 coluna nova, começa como "não" para tudo). Seguro rodar com dados já cadastrados e rodar mais de uma vez.
+   12. `0012_ping_atividade.sql` — o `ping` passa a atualizar uma tabelinha `keep_alive` (1 única linha) 2 vezes ao dia, o que conta como atividade real e evita o Supabase pausar o projeto. Seguro rodar mais de uma vez.
 3. Em **Project Settings → API**, copie a **URL** e a **anon public key**.
 4. Em **Authentication → URL Configuration**, adicione a URL do seu site (local e depois a do Netlify) em *Site URL* e *Redirect URLs* (necessário para o link de redefinição de senha funcionar).
 5. **Criar seu usuário:** o app não tem tela de autocadastro (por segurança, só quem tem acesso ao painel do Supabase cria contas novas). Para criar a sua:
@@ -189,3 +191,13 @@ Abra `http://localhost:3000` — você será redirecionado para `/login`.
 - O gráfico "Pago x a pagar" e o card "Parceladas acabando" baixavam TODAS as parcelas a cada abertura
   do Dashboard. Agora o banco manda só as somas (bem menos dados no 4G e no limite de tráfego do Supabase).
 - Índices novos deixam as consultas rápidas mesmo com anos de lançamentos.
+
+
+## Conta importante (estrela)
+
+- **Como marcar:** toque na **estrela** de qualquer conta em *Contas do Mês* ou em *Saídas*. Também dá para marcar ao cadastrar ou em *Editar conta* (caixa "Conta importante"), e várias de uma vez em *Contas do Mês → Agrupar contas → Importante*.
+- **Aparece primeiro:** as importantes ficam no topo de *Contas do Mês* e de *Saídas* (dentro de cada bloco continua a ordem por vencimento) e também sobem nas listas "Próximas a vencer" e "Atrasadas" do Dashboard, com uma estrelinha (em **roxo**, para não confundir com o amarelo de "Pendente"). Na tela *Contas do Mês* há ainda o filtro **Importantes**.
+- **Conta recorrente:** a marca fica na **conta**, não na parcela. Marcou uma vez, vale para **todos os meses** (passados, o atual e os que ainda vão ser criados). Tirar a estrela também vale para todos.
+- **Conta parcelada:** vale para todas as parcelas da compra. **Conta avulsa:** vale para ela mesma.
+- **Banco:** rode `supabase/migrations/0011_conta_importante.sql` no SQL Editor **antes** de publicar a nova versão (sem a coluna nova o Dashboard não carrega). Não apaga nem altera nenhum dado.
+- **Botão de pagar:** na lista de contas, o botão agora é rosa e se chama **Pagar**; o selo verde **Pago** só aparece em conta já paga (antes os dois eram verdes e com o mesmo nome).

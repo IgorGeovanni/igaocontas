@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Undo2, Pencil } from "lucide-react";
+import { Check, Undo2, Pencil, Star } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/finance/Money";
 import { StatusBadge } from "@/components/finance/StatusBadge";
@@ -17,6 +17,7 @@ interface Props {
   onDesmarcarPago: () => void;
   onNaoPago: () => void;
   onEditar: () => void;
+  onAlternarImportante: () => void;
 }
 
 export function BillCard({
@@ -27,11 +28,14 @@ export function BillCard({
   onDesmarcarPago,
   onNaoPago,
   onEditar,
+  onAlternarImportante,
 }: Props) {
   const [processando, setProcessando] = useState(false);
   const atrasada = estaAtrasada(parcela.vencimento_atual, parcela.status);
   const status = parcela.status === "pago" ? "pago" : atrasada ? "atrasado" : "pendente";
   const temJuros = parcela.juros_centavos > 0;
+  const importante = !!parcela.expense_sources.importante;
+  const recorrente = parcela.expense_sources.tipo === "recorrente";
   const mesPago = mesDoPagamento(parcela.pago_em);
   const pagaEmOutroMes = parcela.status === "pago" && !!parcela.pago_em && mesPago !== parcela.mes_referencia;
 
@@ -42,10 +46,19 @@ export function BillCard({
   }
 
   return (
-    <Card className="flex flex-col gap-3 py-4 lg:flex-row lg:items-center lg:justify-between">
+    <Card
+      className={`flex flex-col gap-3 py-4 lg:flex-row lg:items-center lg:justify-between ${
+        importante ? "!border-violet-400/60" : ""
+      }`}
+    >
       <div className="min-w-0 lg:flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="min-w-0 break-words font-medium">{parcela.expense_sources.descricao}</p>
+          {importante && (
+            <span className="flex shrink-0 items-center gap-1 rounded-pill bg-violet-400/15 px-2 py-0.5 text-[11px] font-semibold text-violet-300">
+              <Star size={11} fill="currentColor" /> Importante
+            </span>
+          )}
           {parcela.total_parcelas && parcela.total_parcelas > 1 && (
             <span className="shrink-0 rounded-pill bg-base-surface2 px-2 py-0.5 text-[11px] text-ink-muted">
               {parcela.numero_parcela}/{parcela.total_parcelas}
@@ -83,6 +96,25 @@ export function BillCard({
         <StatusBadge status={status} />
 
         <button
+          onClick={onAlternarImportante}
+          aria-pressed={importante}
+          title={
+            importante
+              ? recorrente
+                ? "Tirar a marca de importante (vale para todos os meses)"
+                : "Tirar a marca de importante"
+              : recorrente
+                ? "Marcar como importante (vale para todos os meses)"
+                : "Marcar como importante"
+          }
+          className={`rounded-full p-2 hover:bg-base-surface2 ${
+            importante ? "text-violet-300" : "text-ink-muted hover:text-ink-primary"
+          }`}
+        >
+          <Star size={16} fill={importante ? "currentColor" : "none"} />
+        </button>
+
+        <button
           onClick={onEditar}
           title="Editar valor, juros ou vencimento"
           className="rounded-full p-2 text-ink-muted hover:bg-base-surface2 hover:text-ink-primary"
@@ -104,9 +136,9 @@ export function BillCard({
             <button
               disabled={processando}
               onClick={onPagar}
-              className="flex items-center gap-1 rounded-pill bg-money-in/15 px-3 py-1.5 text-xs font-semibold text-money-in hover:bg-money-in/25"
+              className="flex items-center gap-1 rounded-pill bg-brand-pink/15 px-3 py-1.5 text-xs font-semibold text-brand-pink hover:bg-brand-pink/25"
             >
-              <Check size={14} /> Pago
+              <Check size={14} /> Pagar
             </button>
             <button
               disabled={processando}

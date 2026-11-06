@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, Layers, Tag } from "lucide-react";
+import { Plus, Layers, Tag, Star } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -15,6 +15,7 @@ import { PayInstallmentModal } from "@/components/finance/PayInstallmentModal";
 import { NewExpenseModal } from "@/components/finance/NewExpenseModal";
 import { BulkGroupBar, type AlteracaoEmLote } from "@/components/finance/BulkGroupBar";
 import { obterOuCriarGrupo } from "@/lib/finance/grupos";
+import { definirImportante, importantesPrimeiro } from "@/lib/finance/importante";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useGroups } from "@/lib/hooks/useGroups";
 import { createClient } from "@/lib/supabase/client";
@@ -58,6 +59,7 @@ function ContasDoMesConteudo() {
   const [categoriaFiltro, setCategoriaFiltro] = useState("");
   const [grupoFiltro, setGrupoFiltro] = useState("");
   const [busca, setBusca] = useState("");
+  const [soImportantes, setSoImportantes] = useState(false);
 
   const [parcelas, setParcelas] = useState<ExpenseInstallmentWithSource[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -92,7 +94,7 @@ function ContasDoMesConteudo() {
     setErroSelecao(null);
   }
 
-  async function aplicarEmLote({ grupoId, novoGrupo, categoriaId }: AlteracaoEmLote) {
+  async function aplicarEmLote({ grupoId, novoGrupo, categoriaId, importante }: AlteracaoEmLote) {
     // só conta o que está visível na lista (filtros podem esconder itens marcados antes)
     const escolhidas = filtradas.filter((p) => selecionadas.has(p.id));
     if (escolhidas.length === 0) return;
@@ -113,9 +115,10 @@ function ContasDoMesConteudo() {
     }
 
     const idsContas = Array.from(new Set(escolhidas.map((p) => p.source_id)));
-    const alteracoes: { grupo_id?: string | null; categoria_id?: string | null } = {};
+    const alteracoes: { grupo_id?: string | null; categoria_id?: string | null; importante?: boolean } = {};
     if (grupoFinal !== undefined) alteracoes.grupo_id = grupoFinal;
     if (categoriaId !== undefined) alteracoes.categoria_id = categoriaId;
+    if (importante !== undefined) alteracoes.importante = importante;
     if (Object.keys(alteracoes).length === 0) {
       setAplicandoGrupo(false);
       return;
@@ -203,7 +206,7 @@ function ContasDoMesConteudo() {
   const categoriaNome = (id: string | null) => categorias.find((c) => c.id === id)?.nome ?? "Sem categoria";
   const grupoNome = (id: string | null) => grupos.find((g) => g.id === id)?.nome ?? null;
 
-  const filtradas = parcelas.filter((p) => {
+  const filtradasSemOrdem = parcelas.filter((p) => {
     const atrasada = estaAtrasada(p.vencimento_atual, p.status);
     if (statusFiltro === "pagas" && p.status !== "pago") return false;
     if (statusFiltro === "nao_pagas" && p.status !== "pendente") return false;
@@ -215,10 +218,13 @@ function ContasDoMesConteudo() {
     if (grupoFiltro === SEM_GRUPO) {
       if (p.expense_sources.grupo_id) return false;
     } else if (grupoFiltro && p.expense_sources.grupo_id !== grupoFiltro) return false;
+    if (soImportantes && !p.expense_sources.importante) return false;
     if (busca.trim() && !p.expense_sources.descricao.toLowerCase().includes(busca.trim().toLowerCase()))
       return false;
     return true;
   });
+  // contas marcadas como importantes ficam no topo; dentro de cada bloco a ordem por vencimento continua
+  const filtradas = importantesPrimeiro(filtradasSemOrdem, (p) => !!p.expense_sources.importante);
 
   const totalPendente = filtradas
     .filter((p) => p.status === "pendente")
@@ -227,6 +233,23 @@ function ContasDoMesConteudo() {
   const totalPago = filtradas
     .filter((p) => p.status === "pago" && (modoTodosMeses || mesDoPagamento(p.pago_em) === mes))
     .reduce((acc, p) => acc + valorEfetivo(p), 0);
+
+  // A tag fica na conta: todas as parcelas/meses da mesma conta mudam juntos (já na tela, sem esperar).
+  async function alternarImportante(p: ExpenseInstallmentWithSource) {
+    const novoValor = !p.expense_sources.importante;
+    const mudar = (valor: boolean) =>
+      setParcelas((lista) =>
+        lista.map((x) =>
+          x.source_id === p.source_id ? { ...x, expense_sources: { ...x.expense_sources, importante: valor } } : x
+        )
+      );
+    mudar(novoValor);
+    const erro = await definirImportante(createClient(), [p.source_id], novoValor);
+    if (erro) {
+      mudar(!novoValor); // não gravou: volta como estava
+      window.alert(`Não foi possível ${novoValor ? "marcar" : "desmarcar"} como importante: ${erro}`);
+    }
+  }
 
   async function desmarcarPago(id: string) {
     if (!window.confirm("Desfazer o pagamento? A conta volta a ficar como não paga.")) return;
@@ -318,6 +341,17 @@ function ContasDoMesConteudo() {
             {rotulo}
           </button>
         ))}
+        <button
+          onClick={() => setSoImportantes((atual) => !atual)}
+          aria-pressed={soImportantes}
+          className={`flex items-center gap-1 rounded-pill px-3.5 py-1.5 text-xs font-medium transition ${
+            soImportantes
+              ? "bg-violet-400 text-base-bg"
+              : "border border-base-border text-ink-muted hover:bg-base-surface2"
+          }`}
+        >
+          <Star size={12} fill={soImportantes ? "currentColor" : "none"} /> Importantes
+        </button>
       </div>
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
@@ -440,6 +474,7 @@ function ContasDoMesConteudo() {
                   onDesmarcarPago={() => desmarcarPago(p.id)}
                   onNaoPago={() => setAdiando(p)}
                   onEditar={() => setEditando(p)}
+                  onAlternarImportante={() => alternarImportante(p)}
                 />
               </div>
             </div>

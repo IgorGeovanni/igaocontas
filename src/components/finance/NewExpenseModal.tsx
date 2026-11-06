@@ -8,6 +8,7 @@ import { textoParaCentavos, formatarMoeda } from "@/lib/finance/money";
 import { hojeISO } from "@/lib/finance/dates";
 import { obterOuCriarGrupo } from "@/lib/finance/grupos";
 import { novoId } from "@/lib/finance/ids";
+import { definirImportante } from "@/lib/finance/importante";
 import { mensagemDeErro } from "@/lib/rede/redeResiliente";
 
 type Tipo = "simples" | "parcelado" | "recorrente";
@@ -48,6 +49,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
   const [inicioRecorrencia, setInicioRecorrencia] = useState(hojeStr());
 
   const [jaPaga, setJaPaga] = useState(false);
+  const [importante, setImportante] = useState(false);
   const [dataPagamento, setDataPagamento] = useState(hojeStr());
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
     setInicioRecorrencia(hojeStr());
     setTipo("simples");
     setJaPaga(false);
+    setImportante(false);
     setDataPagamento(hojeStr());
     setErro(null);
   }
@@ -139,7 +142,7 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
         : new Date().toISOString()
       : null;
 
-    const { error } = await supabase.rpc("criar_conta", {
+    const { data: idConta, error } = await supabase.rpc("criar_conta", {
       p_chave: chave.current,
       p_tipo: tipo,
       p_descricao: descricao.trim(),
@@ -155,13 +158,25 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
       p_pago_em: pagoEm,
     });
 
-    setSalvando(false);
     if (error) {
+      setSalvando(false);
       // a chave continua a mesma: tentar de novo não duplica
       setErro(mensagemDeErro(error));
       return;
     }
 
+    // A tag "importante" fica na conta: marca logo depois de criar (se falhar, a conta já existe e a
+    // pessoa pode marcar pela estrela; tentar salvar de novo devolve a mesma conta e marca de novo).
+    if (importante && idConta) {
+      const erroTag = await definirImportante(supabase, [String(idConta)], true);
+      if (erroTag) {
+        setSalvando(false);
+        setErro(`A conta foi criada, mas não deu para marcar como importante: ${erroTag}`);
+        return;
+      }
+    }
+
+    setSalvando(false);
     chave.current = novoId(); // próximo cadastro é outra conta
     limpar();
     onSalvo();
@@ -415,6 +430,23 @@ export function NewExpenseModal({ aberto, onFechar, onSalvo }: Props) {
               </div>
             )}
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-base-border bg-base-surface2 px-4 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={importante}
+              onChange={(e) => setImportante(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-pink"
+            />
+            <span>
+              Conta importante
+              <span className="block text-xs text-ink-muted">
+                {tipo === "recorrente"
+                  ? "Aparece primeiro nas listas, em todos os meses."
+                  : "Aparece primeiro nas listas."}
+              </span>
+            </span>
+          </label>
 
           <div>
             <label className="mb-1 block text-xs text-ink-muted">Observação (opcional)</label>
