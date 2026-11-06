@@ -22,6 +22,7 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
   const { grupos, recarregar: recarregarGrupos } = useGroups();
   const [grupoId, setGrupoId] = useState("");
   const [novoGrupo, setNovoGrupo] = useState("");
+  const [importante, setImportante] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -32,6 +33,7 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
       setVencimento(parcela.vencimento_atual);
       setGrupoId(parcela.expense_sources.grupo_id ?? "");
       setNovoGrupo("");
+      setImportante(!!parcela.expense_sources.importante);
       setErro(null);
     }
   }, [parcela]);
@@ -65,10 +67,14 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
       }
       grupoFinal = grupo.id;
     }
-    if (grupoFinal !== (parcela!.expense_sources.grupo_id ?? null)) {
+    // grupo e "importante" ficam na CONTA (valem para todas as parcelas/meses dela)
+    const alteracoesFonte: { grupo_id?: string | null; importante?: boolean } = {};
+    if (grupoFinal !== (parcela!.expense_sources.grupo_id ?? null)) alteracoesFonte.grupo_id = grupoFinal;
+    if (importante !== !!parcela!.expense_sources.importante) alteracoesFonte.importante = importante;
+    if (Object.keys(alteracoesFonte).length > 0) {
       const { error: erroFonte } = await supabase
         .from("expense_sources")
-        .update({ grupo_id: grupoFinal })
+        .update(alteracoesFonte)
         .eq("id", parcela!.source_id);
       if (erroFonte) {
         setSalvando(false);
@@ -182,6 +188,25 @@ export function EditInstallmentModal({ parcela, onFechar, onSalvo }: Props) {
               </p>
             )}
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-base-border bg-base-surface2 px-4 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={importante}
+              onChange={(e) => setImportante(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-pink"
+            />
+            <span>
+              Conta importante
+              <span className="block text-xs text-ink-muted">
+                {parcela.expense_sources.tipo === "recorrente"
+                  ? "Aparece primeiro nas listas, em todos os meses (inclusive os próximos)."
+                  : parcela.total_parcelas && parcela.total_parcelas > 1
+                    ? "Aparece primeiro nas listas, em todas as parcelas dessa compra."
+                    : "Aparece primeiro nas listas."}
+              </span>
+            </span>
+          </label>
 
           {jurosCentavos > 0 && (
             <div className="rounded-xl border border-base-border bg-base-surface2 px-4 py-3 text-sm">
